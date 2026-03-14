@@ -1,13 +1,16 @@
 from agents.planner_agent import create_plan
 from agents.code_generation_agent import generate_code
-
+from tools.static_analysis_tool import run_static_analysis
+from services.langfuse_service import start_trace
 
 def run_workflow(requirement):
 
-    print("Planning task...")
+    trace = start_trace("automotive-development")
+
     plan = create_plan(requirement)
 
-    print("Generating code...")
     code = generate_code(plan)
+
+    trace.end()
 
     return code
