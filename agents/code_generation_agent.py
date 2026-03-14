@@ -1,4 +1,5 @@
 from services.llm_service import llm
+import json
 
 def generate_code(spec):
 
@@ -20,6 +21,5 @@ def generate_code(spec):
     """
 
     response = llm.invoke(prompt)
-
-    return response.content
+    result = json.loads(response.content)
 
