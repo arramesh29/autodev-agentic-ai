@@ -1,6 +1,13 @@
+import os
+from dotenv import load_dotenv
 from langfuse import Langfuse
 
-langfuse = Langfuse()
+load_dotenv()
 
-def start_trace(name):
-    return langfuse.trace(name=name)
+langfuse = Langfuse(
+    public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+    host=os.getenv("LANGFUSE_BASE_URL"),
+)
+
+trace = langfuse.start_trace(name="autodev")
