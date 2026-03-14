@@ -9,5 +9,3 @@ langfuse = Langfuse(
     secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
     host=os.getenv("LANGFUSE_BASE_URL"),
 )
-
-trace = langfuse.start_trace(name="autodev")
