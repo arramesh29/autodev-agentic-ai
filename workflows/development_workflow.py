@@ -1,4 +1,4 @@
-from langfuse.decorators import observe
+from langfuse import observe
 from agents.planner_agent import create_plan
 from agents.code_generation_agent import generate_code
 
