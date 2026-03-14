@@ -3,10 +3,12 @@ from services.llm_service import llm
 def create_plan(requirement):
 
     prompt = f"""
-    Break the following automotive software requirement
-    into development steps:
+    Break the following automotive requirement into
+    software development tasks:
 
     {requirement}
     """
 
-    return llm.predict(prompt)
+    response = llm.invoke(prompt)
+
+    return response.content
