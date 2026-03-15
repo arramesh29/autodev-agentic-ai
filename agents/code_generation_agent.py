@@ -4,16 +4,22 @@ import json
 def generate_code(spec):
 
     prompt = f"""
-    Generate production quality C++ code for the requirement below.
-    
-    Return ONLY valid JSON in this format:
-    
+    You are an automotive software engineer.
+
+    Generate C++ implementation and tests for the requirement below.
+
+    Return ONLY valid JSON.
+    Do not include explanations.
+    Do not include markdown.
+
+    Format:
+
     {{
-     "files":[
-       {{"filename":"module.h","content":"header file"}},
-       {{"filename":"module.cpp","content":"implementation"}},
-       {{"filename":"test_module.cpp","content":"unit tests"}}
-     ]
+      "files":[
+        {{"filename":"module.h","content":"header code"}},
+        {{"filename":"module.cpp","content":"implementation"}},
+        {{"filename":"test_module.cpp","content":"unit tests"}}
+      ]
     }}
 
     Requirement:
@@ -21,5 +27,16 @@ def generate_code(spec):
     """
 
     response = llm.invoke(prompt)
-    result = json.loads(response.content)
+    text = response.content.strip()
+
+    # Remove markdown if present
+    text = text.replace("```json", "")
+    text = text.replace("```", "")
+
+    try:
+        result = json.loads(text)
+    except Exception:
+        raise ValueError(f"Invalid JSON from LLM:\n{text}")
+
+    return result
 
