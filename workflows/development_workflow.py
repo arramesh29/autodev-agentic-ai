@@ -13,27 +13,18 @@ def run_workflow(requirement):
     plan = create_plan(requirement)
 
     # Step 2: Generate C++ code and tests
-    response = generate_code(plan)
+    result = generate_code(plan)
 
-    # Step 3: Parse JSON output from LLM
-    try:
-        result = json.loads(response)
-    except Exception:
-        return {
-            "error": "LLM output was not valid JSON",
-            "raw_output": response
-        }
-
-    # Step 4: Extract files
+    # Step 3: Extract files
     files = result.get("files", [])
 
     if not files:
         return {"error": "No files generated"}
 
-    # Step 5: Write files to disk
+    # Step 4: Write files to disk
     write_files(files)
 
-    # Step 6: Return readable API response
+    # Step 5: Return readable API response
     return {
         "generated_files": [f["filename"] for f in files],
         "output_directory": "generated/"
