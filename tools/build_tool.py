@@ -1,16 +1,24 @@
 import subprocess
 import os
 
+import subprocess
+import os
+import shutil
+
 def build_project():
 
-    source_dir = "generated"
-    build_dir = "generated/build"
+    source_dir = os.path.abspath("generated")
+    build_dir = os.path.join(source_dir, "build")
+
+    # 🔥 Clean build directory completely (safe & simple)
+    if os.path.exists(build_dir):
+        shutil.rmtree(build_dir)
 
     os.makedirs(build_dir, exist_ok=True)
 
-    # Configure
+    # Step 1: Configure
     configure = subprocess.run(
-        ["cmake", "-G", "Visual Studio 17 2022", ".."],
+        ["cmake", "-G", "Visual Studio 17 2022", source_dir],
         cwd=build_dir,
         capture_output=True,
         text=True
@@ -19,7 +27,7 @@ def build_project():
     if configure.returncode != 0:
         return configure.stdout + configure.stderr
 
-    # Build
+    # Step 2: Build
     build = subprocess.run(
         ["cmake", "--build", ".", "--config", "Release"],
         cwd=build_dir,
