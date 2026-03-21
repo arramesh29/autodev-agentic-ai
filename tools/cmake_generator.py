@@ -20,6 +20,9 @@ project(GeneratedProject)
 
 set(CMAKE_CXX_STANDARD 17)
 
+# Force consistent runtime
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDebugDLL")
+
 # Enable testing
 enable_testing()
 
