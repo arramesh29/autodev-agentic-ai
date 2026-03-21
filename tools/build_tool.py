@@ -15,7 +15,7 @@ def build_project():
 
     # Configure with MSVC
     configure = subprocess.run(
-        ["cmake", "-G", "NMake Makefiles", source_dir],
+        ["cmake", "-G", "NMake Makefiles", "-DCMAKE_POLICY_VERSION_MINIMUM=3.5", source_dir],
         cwd=build_dir,
         capture_output=True,
         text=True,
