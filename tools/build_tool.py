@@ -34,4 +34,16 @@ def build_project():
         shell=True
     )
 
-    return build.stdout + build.stderr
+    if build.returncode != 0:
+        return build.stdout + build.stderr
+
+    # ✅ Run tests
+    test = subprocess.run(
+        ["ctest", "--output-on-failure"],
+        cwd=build_dir,
+        capture_output=True,
+        text=True,
+        shell=True
+    )
+
+    return test.stdout + test.stderr
