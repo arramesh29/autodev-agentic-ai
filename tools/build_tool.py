@@ -5,9 +5,9 @@ def build_project():
 
     build_dir = "generated"
 
-    # Configure
+    # Configure with Visual Studio generator
     configure = subprocess.run(
-        ["cmake", "."],
+        ["cmake", "-G", "Visual Studio 17 2022", "."],
         cwd=build_dir,
         capture_output=True,
         text=True
@@ -18,7 +18,7 @@ def build_project():
 
     # Build
     build = subprocess.run(
-        ["cmake", "--build", "."],
+        ["cmake", "--build", ".", "--config", "Release"],
         cwd=build_dir,
         capture_output=True,
         text=True
