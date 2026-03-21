@@ -3,11 +3,14 @@ import os
 
 def build_project():
 
-    build_dir = "generated"
+    source_dir = "generated"
+    build_dir = "generated/build"
 
-    # Configure with Visual Studio generator
+    os.makedirs(build_dir, exist_ok=True)
+
+    # Configure
     configure = subprocess.run(
-        ["cmake", "-G", "Visual Studio 17 2022", "."],
+        ["cmake", "-G", "Visual Studio 17 2022", ".."],
         cwd=build_dir,
         capture_output=True,
         text=True
