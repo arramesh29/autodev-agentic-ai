@@ -14,6 +14,12 @@ def generate_code(spec):
     - Deterministic logic (no randomness)
     - Automotive safety style (clear logic, no undefined behavior)
 
+    IMPORTANT:
+        - Include all necessary headers
+        - Use standard C++ includes
+        - Ensure code compiles without errors
+        - Avoid missing includes (e.g., <limits>, <cmath>, <vector>)
+
     Unit Test Requirements:
     - Use GoogleTest
     - Cover:
