@@ -15,7 +15,7 @@ def generate_cmake(files):
             test_files.append(name)
 
     cmake_content = f"""
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.14...4.0)
 project(GeneratedProject)
 
 set(CMAKE_CXX_STANDARD 17)
