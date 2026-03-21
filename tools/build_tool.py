@@ -1,6 +1,9 @@
 import subprocess
+import os
 
 def build_project():
+
+    os.chdir("generated")
 
     result = subprocess.run(
         ["cmake", "--build", "."],
