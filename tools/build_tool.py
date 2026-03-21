@@ -3,12 +3,25 @@ import os
 
 def build_project():
 
-    os.chdir("generated")
+    build_dir = "generated"
 
-    result = subprocess.run(
-        ["cmake", "--build", "."],
+    # Configure
+    configure = subprocess.run(
+        ["cmake", "."],
+        cwd=build_dir,
         capture_output=True,
         text=True
     )
 
-    return result.stdout + result.stderr
+    if configure.returncode != 0:
+        return configure.stdout + configure.stderr
+
+    # Build
+    build = subprocess.run(
+        ["cmake", "--build", "."],
+        cwd=build_dir,
+        capture_output=True,
+        text=True
+    )
+
+    return build.stdout + build.stderr
