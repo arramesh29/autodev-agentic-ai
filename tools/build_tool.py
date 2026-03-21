@@ -2,5 +2,10 @@ import subprocess
 
 def build_project():
 
-    subprocess.run(["cmake", "."])
-    subprocess.run(["make"])
+    result = subprocess.run(
+        ["cmake", "--build", "."],
+        capture_output=True,
+        text=True
+    )
+
+    return result.stdout + result.stderr
