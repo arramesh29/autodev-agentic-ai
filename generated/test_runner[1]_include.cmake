@@ -1,0 +1,5 @@
+if(EXISTS "C:/Users/rames/autodev_agentic-ai/generated/test_runner[1]_tests.cmake")
+  include("C:/Users/rames/autodev_agentic-ai/generated/test_runner[1]_tests.cmake")
+else()
+  add_test(test_runner_NOT_BUILT test_runner_NOT_BUILT)
+endif()

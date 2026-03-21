@@ -1,0 +1,10 @@
+{
+	"InstallScripts" : 
+	[
+		"C:/Users/rames/autodev_agentic-ai/generated/cmake_install.cmake",
+		"C:/Users/rames/autodev_agentic-ai/generated/_deps/googletest-build/cmake_install.cmake",
+		"C:/Users/rames/autodev_agentic-ai/generated/_deps/googletest-build/googlemock/cmake_install.cmake",
+		"C:/Users/rames/autodev_agentic-ai/generated/_deps/googletest-build/googletest/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
