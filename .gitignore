@@ -3,3 +3,7 @@ venv/
 __pycache__/
 *.pyc
 .vscode/
+generated/googletest/
+generated/_deps/
+generated/build/
+googletest/
