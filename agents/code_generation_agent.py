@@ -4,9 +4,26 @@ import json
 def generate_code(spec):
 
     prompt = f"""
-    You are an automotive software engineer.
+    You are an automotive C++ software engineer.
 
-    Generate C++ implementation and tests for the requirement below.
+    Generate production-grade C++ code and unit tests using GoogleTest.
+
+    Requirements:
+    - Follow modular design (.h + .cpp)
+    - No experimental code
+    - Deterministic logic (no randomness)
+    - Automotive safety style (clear logic, no undefined behavior)
+
+    Unit Test Requirements:
+    - Use GoogleTest
+    - Cover:
+      - C0 (statement coverage)
+      - C1 (branch coverage)
+    - Include:
+      - normal cases
+      - boundary conditions
+      - failure conditions
+      - edge cases
 
     Return ONLY valid JSON.
     Do not include explanations.
@@ -16,9 +33,9 @@ def generate_code(spec):
 
     {{
       "files":[
-        {{"filename":"module.h","content":"header code"}},
-        {{"filename":"module.cpp","content":"implementation"}},
-        {{"filename":"test_module.cpp","content":"unit tests"}}
+        {{"filename":"aeb_controller.h","content":"header code"}},
+        {{"filename":"aeb_controller.cpp","content":"implementation"}},
+        {{"filename":"test_aeb_controller.cpp","content":"GoogleTest code"}}
       ]
     }}
 
