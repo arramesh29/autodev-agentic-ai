@@ -2,7 +2,7 @@ import subprocess
 import os
 import shutil
 
-def build_project():
+def build_and_test():
 
     source_dir = os.path.abspath("generated")
     build_dir = os.path.join(source_dir, "build")
