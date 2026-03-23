@@ -1,31 +1,32 @@
 from services.llm_service import llm
 import json
 
+
 def fix_code(error_log, files):
 
     prompt = f"""
-    You are an expert automotive C++ developer.
+You are a senior automotive C++ software engineer.
 
-    The following code failed to compile.
+The system failed during build or test execution.
 
-    ERROR LOG:
-    {error_log}
+ERROR / TEST OUTPUT:
+{error_log}
 
-    FILES:
-    {files}
+FILES:
+{files}
 
-    Fix ALL issues.
+Instructions:
+- Fix compilation errors if present
+- Fix failing test logic if present
+- Do NOT hardcode values just to pass tests
+- Maintain clean, production-quality C++ code
+- Ensure proper includes and correct formulas
 
-    Ensure:
-    - Correct headers
-    - Valid C++17
-    - No syntax errors
-
-    Return ONLY JSON:
-    {{
-      "files":[{{"filename":"...","content":"..."}}]
-    }}
-    """
+Return ONLY valid JSON:
+{{
+  "files":[{{"filename":"...","content":"..."}}]
+}}
+"""
 
     response = llm.invoke(prompt)
 
