@@ -5,7 +5,7 @@ import shutil
 def build_and_test():
 
     source_dir = os.path.abspath("generated")
-    build_dir = os.path.join(source_dir, "build")
+    build_dir = os.path.abspath("build")
 
     # Clean build directory
     if os.path.exists(build_dir):
