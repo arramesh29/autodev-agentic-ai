@@ -12,6 +12,8 @@ from tools.build_tool import build_project
 @observe()
 def run_workflow(requirement):
 
+    logs = []
+
     # Step 1: Create development plan
     plan = create_plan(requirement)
 
@@ -30,39 +32,52 @@ def run_workflow(requirement):
     # Step 5: Generate CMake
     generate_cmake(files)
 
-    MAX_RETRIES = 3
+    MAX_RETRIES = 5
     build_output = ""
 
     # 🔁 Step 6: Build + Debug Loop
     for attempt in range(MAX_RETRIES):
 
-        print(f"Build attempt {attempt+1}")
+        logs.append(f"\n=== Attempt {attempt} ===")
 
-        build_output = build_project()
+        output = build_and_test()
 
-        # ✅ If build successful
-        if "error" not in build_output.lower():
+        # ✅ SUCCESS CONDITION
+        if "failed" not in output.lower() and "error" not in output.lower():
+            logs.append("✅ Build and all tests passed successfully")
+
             return {
                 "status": "success",
                 "generated_files": [f["filename"] for f in files],
-                "output_directory": "generated/"
+                "execution_log": logs
             }
 
-        # ❌ Build failed → Debug Agent
-        print("Build failed. Invoking debug agent...")
+        # ❌ FAILURE
+        logs.append("❌ Failure detected")
+        logs.append(output[:1000])  # truncate for readability
+
+        # Identify failure type
+        if "error" in output.lower():
+            reason = "Compilation/Build Error"
+        else:
+            reason = "Test Failure (Logic Error)"
+
+        logs.append(f"🔍 Reason: {reason}")
 
         try:
-            files = fix_code(build_output, files)
+            files = fix_code(output, files)
             write_files(files)
+            logs.append("🔧 Fix applied by debug agent")
+
         except Exception as e:
+            logs.append(f"❌ Debug agent failed: {str(e)}")
+
             return {
                 "status": "debug_failed",
-                "error": str(e),
-                "build_log": build_output
+                "execution_log": logs
             }
 
-    # ❌ Failed after retries
     return {
         "status": "failed_after_retries",
-        "build_log": build_output
+        "execution_log": logs
     }
