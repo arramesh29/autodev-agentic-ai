@@ -13,52 +13,8 @@ System that:
 * Uses Langfuse for observability
 
 ## Architecture
+<img width="399" height="679" alt="image" src="https://github.com/user-attachments/assets/65f96468-95d8-4acc-8a54-866a166ee716" />
 
-                ┌─────────────────────────────┐
-                │        FastAPI API          │
-                │     (/generate endpoint)    │
-                └─────────────┬───────────────┘
-                              │
-                              ▼
-                ┌─────────────────────────────┐
-                │   Development Workflow      │
-                │ (Langfuse Observability)    │
-                └─────────────┬───────────────┘
-                              │
-        ┌─────────────────────┼─────────────────────┐
-        ▼                     ▼                     ▼
-┌───────────────┐   ┌──────────────────┐   ┌──────────────────┐
-│ Planner Agent │   │ Code Gen Agent   │   │  Debug Agent     │
-│ (LLM)         │   │ (LLM → C++ code) │   │ (Fix failures)   │
-└───────────────┘   └──────────────────┘   └──────────────────┘
-                              │
-                              ▼
-                ┌─────────────────────────────┐
-                │         Tools Layer         │
-                │-----------------------------│
-                │ file_writer                 │
-                │ cmake_generator             │
-                │ build_tool (CMake + CTest)  │
-                │ test_parser                 │
-                │ confidence_scorer           │
-                └─────────────┬───────────────┘
-                              │
-                              ▼
-                ┌─────────────────────────────┐
-                │   C++ Build System          │
-                │  (MSVC + CMake + GTest)     │
-                └─────────────┬───────────────┘
-                              │
-                              ▼
-                ┌─────────────────────────────┐
-                │   Test Results + Logs       │
-                └─────────────┬───────────────┘
-                              │
-                              ▼
-                ┌─────────────────────────────┐
-                │ Confidence + Decision Logic │
-                │  (Retry / Fix / Success)    │
-                └─────────────────────────────┘
 
 ## Key Features
 
