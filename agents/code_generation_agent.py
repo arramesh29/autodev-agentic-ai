@@ -5,7 +5,6 @@ def generate_code(spec):
 
     prompt = f"""
     You are an automotive C++ software engineer.
-
     Generate production-grade C++ code and unit tests using GoogleTest.
 
     Requirements:
