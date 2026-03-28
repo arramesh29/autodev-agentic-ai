@@ -1,11 +1,13 @@
 from fastapi import FastAPI
-from workflows.development_workflow import run_workflow
-from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-from api.file_api import router as file_router
 from fastapi.responses import StreamingResponse
 import json
 import time
+
+# 🔧 Import your routers
+from api.file_api import router as file_router
+
+# 🔧 Import your agents + tools
 from agents.planner_agent import create_plan
 from agents.code_generation_agent import generate_code
 from agents.debug_agent import fix_code
@@ -17,85 +19,110 @@ from tools.build_tool import build_and_test
 from tools.test_parser import parse_ctest_output
 from tools.confidence_scorer import compute_confidence
 
-app = FastAPI()
-app.include_router(file_router)
 
+# 🚀 Create app
+app = FastAPI()
+
+# 🌐 Enable CORS (IMPORTANT for frontend)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # for dev
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-@app.get("/")
-def home():
-    return {"message": "Autodev Agentic AI API running"}
+# 📂 Include file API
+app.include_router(file_router)
 
-# ✅ REQUEST SCHEMA
-class AgentRequest(BaseModel):
-    query: str
 
-# ✅ ENDPOINT
-@app.post("/agent/run")
-def run_agent(request: AgentRequest):
-    print("Incoming request:", request)
-    return run_workflow(request.query)
+# 🔥 Helper to format SSE messages
+def sse(data):
+    return f"data: {json.dumps(data)}\n\n"
 
+
+# 🚀 STREAMING ENDPOINT
 @app.get("/agent/stream")
 def stream_workflow(query: str):
 
     def event_stream():
 
-        # ✅ SEND FIRST EVENT IMMEDIATELY
-        yield f"data: {json.dumps({'step': 'start'})}\n\n"
-        time.sleep(0.1)  # 🔥 FORCE FLUSH
-
-        # NOW do heavy work
-        plan = create_plan(query)
-
-        yield f"data: {json.dumps({'step': 'plan_created'})}\n\n"
-        time.sleep(0.1)
-
-        result = generate_code(plan)
-        files = result.get("files", [])
-
-        yield f"data: {json.dumps({
-            'step': 'code_generated',
-            'files': [f['filename'] for f in files]
-        })}\n\n"
-        time.sleep(0.1)
-
-        write_files(files)
-        generate_cmake(files)
-
-        for attempt in range(5):
-
-            yield f"data: {json.dumps({
-                'step': 'build_attempt',
-                'attempt': attempt
-            })}\n\n"
+        try:
+            # ✅ Start immediately
+            yield sse({"step": "start"})
             time.sleep(0.1)
 
-            output = build_and_test()
-
-            parsed = parse_ctest_output(output)
-            confidence = compute_confidence(parsed)
-
-            yield f"data: {json.dumps({
-                'step': 'test_result',
-                'parsed': parsed,
-                'confidence': confidence
-            })}\n\n"
+            # 🧠 PLAN
+            plan = create_plan(query)
+            yield sse({"step": "plan_created"})
             time.sleep(0.1)
 
-            if confidence["status"] == "success":
-                yield f"data: {json.dumps({'step': 'done'})}\n\n"
-                return
+            # 🧠 CODE GENERATION
+            result = generate_code(plan)
+            files = result.get("files", [])
 
-            files = fix_code(output, files)
+            yield sse({
+                "step": "code_generated",
+                "files": [f["filename"] for f in files]
+            })
+            time.sleep(0.1)
+
+            # 💾 WRITE FILES
             write_files(files)
+            generate_cmake(files)
 
-        yield f"data: {json.dumps({'step': 'failed'})}\n\n"
+            MAX_RETRIES = 5
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+            # 🔁 BUILD LOOP
+            for attempt in range(MAX_RETRIES):
+
+                yield sse({
+                    "step": "build_attempt",
+                    "attempt": attempt
+                })
+                time.sleep(0.1)
+
+                output = build_and_test()
+
+                parsed = parse_ctest_output(output)
+                confidence = compute_confidence(parsed)
+
+                yield sse({
+                    "step": "test_result",
+                    "parsed": parsed,
+                    "confidence": confidence
+                })
+                time.sleep(0.1)
+
+                # ✅ SUCCESS
+                if confidence["status"] == "success":
+                    yield sse({"step": "done"})
+                    return
+
+                # 🔧 DEBUG FIX
+                files = fix_code(output, files)
+                write_files(files)
+
+            # ❌ FAILURE
+            yield sse({"step": "failed"})
+
+        except Exception as e:
+            # 🔥 IMPORTANT: Send error to frontend
+            yield sse({
+                "step": "error",
+                "message": str(e)
+            })
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream"
+    )
+
+
+# 🚀 OPTIONAL: Keep existing batch API (if you have)
+@app.post("/agent/run")
+def run_agent(request: dict):
+    query = request.get("query", "")
+
+    # You can call your existing run_workflow here if needed
+    return {"status": "use /agent/stream for live execution"}
