@@ -6,6 +6,16 @@ from api.file_api import router as file_router
 from fastapi.responses import StreamingResponse
 import json
 import time
+from agents.planner_agent import create_plan
+from agents.code_generation_agent import generate_code
+from agents.debug_agent import fix_code
+
+from tools.file_writer import write_files
+from tools.cmake_generator import generate_cmake
+from tools.build_tool import build_and_test
+
+from tools.test_parser import parse_ctest_output
+from tools.confidence_scorer import compute_confidence
 
 app = FastAPI()
 app.include_router(file_router)
