@@ -3,7 +3,6 @@ import json
 
 
 def fix_code(error_log, files):
-
     prompt = f"""
 You are a senior automotive C++ software engineer.
 
