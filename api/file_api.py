@@ -3,7 +3,7 @@ import os
 
 router = APIRouter()
 
-BASE_DIR = "C:\Users\rames\autodev_agentic-ai\generated"
+BASE_DIR = r"C:\Users\rames\autodev_agentic-ai\generated"
 
 @router.get("/files/{filename}")
 def get_file(filename: str):
