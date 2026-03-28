@@ -93,7 +93,13 @@ def run_workflow(requirement):
                 "action": "autodev_workflow",
                 "data": {
                     "summary": "Code generated, tested, and validated successfully",
-                    "generated_files": [f["filename"] for f in files],
+                    "generated_files": [
+                        {
+                            "name": f["filename"],
+                            "type": f["filename"].split(".")[-1]
+                        }
+                        for f in files if "filename" in f
+                    ],
                     "test_summary": parsed,
                     "confidence": confidence,
                     "attempts": attempt + 1
