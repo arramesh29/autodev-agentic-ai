@@ -47,10 +47,15 @@ def stream_workflow(query: str):
 
     def event_stream():
 
+        # ✅ SEND FIRST EVENT IMMEDIATELY
         yield f"data: {json.dumps({'step': 'start'})}\n\n"
+        time.sleep(0.1)  # 🔥 FORCE FLUSH
 
+        # NOW do heavy work
         plan = create_plan(query)
+
         yield f"data: {json.dumps({'step': 'plan_created'})}\n\n"
+        time.sleep(0.1)
 
         result = generate_code(plan)
         files = result.get("files", [])
@@ -59,18 +64,18 @@ def stream_workflow(query: str):
             'step': 'code_generated',
             'files': [f['filename'] for f in files]
         })}\n\n"
+        time.sleep(0.1)
 
         write_files(files)
         generate_cmake(files)
 
-        MAX_RETRIES = 5
-
-        for attempt in range(MAX_RETRIES):
+        for attempt in range(5):
 
             yield f"data: {json.dumps({
                 'step': 'build_attempt',
                 'attempt': attempt
             })}\n\n"
+            time.sleep(0.1)
 
             output = build_and_test()
 
@@ -82,6 +87,7 @@ def stream_workflow(query: str):
                 'parsed': parsed,
                 'confidence': confidence
             })}\n\n"
+            time.sleep(0.1)
 
             if confidence["status"] == "success":
                 yield f"data: {json.dumps({'step': 'done'})}\n\n"
