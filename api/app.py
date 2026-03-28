@@ -17,9 +17,12 @@ app.add_middleware(
 def home():
     return {"message": "Autodev Agentic AI API running"}
 
-class RequirementRequest(BaseModel):
-    requirement: str
+# ✅ REQUEST SCHEMA
+class AgentRequest(BaseModel):
+    query: str
 
+# ✅ ENDPOINT
 @app.post("/agent/run")
 def run_agent(request: AgentRequest):
+    print("Incoming request:", request)
     return run_workflow(request.query)
