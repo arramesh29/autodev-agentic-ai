@@ -46,72 +46,20 @@ def sse(data):
 def stream_workflow(query: str):
 
     def event_stream():
+        import time
+        import json
 
-        try:
-            # ✅ Start immediately
-            yield sse({"step": "start"})
-            time.sleep(0.1)
+        def send(msg):
+            print("SENDING:", msg)  # 👈 DEBUG
+            return f"data: {json.dumps(msg)}\n\n"
 
-            # 🧠 PLAN
-            plan = create_plan(query)
-            yield sse({"step": "plan_created"})
-            time.sleep(0.1)
+        yield send({"step": "start"})
+        time.sleep(1)
 
-            # 🧠 CODE GENERATION
-            result = generate_code(plan)
-            files = result.get("files", [])
+        yield send({"step": "middle"})
+        time.sleep(1)
 
-            yield sse({
-                "step": "code_generated",
-                "files": [f["filename"] for f in files]
-            })
-            time.sleep(0.1)
-
-            # 💾 WRITE FILES
-            write_files(files)
-            generate_cmake(files)
-
-            MAX_RETRIES = 5
-
-            # 🔁 BUILD LOOP
-            for attempt in range(MAX_RETRIES):
-
-                yield sse({
-                    "step": "build_attempt",
-                    "attempt": attempt
-                })
-                time.sleep(0.1)
-
-                output = build_and_test()
-
-                parsed = parse_ctest_output(output)
-                confidence = compute_confidence(parsed)
-
-                yield sse({
-                    "step": "test_result",
-                    "parsed": parsed,
-                    "confidence": confidence
-                })
-                time.sleep(0.1)
-
-                # ✅ SUCCESS
-                if confidence["status"] == "success":
-                    yield sse({"step": "done"})
-                    return
-
-                # 🔧 DEBUG FIX
-                files = fix_code(output, files)
-                write_files(files)
-
-            # ❌ FAILURE
-            yield sse({"step": "failed"})
-
-        except Exception as e:
-            # 🔥 IMPORTANT: Send error to frontend
-            yield sse({
-                "step": "error",
-                "message": str(e)
-            })
+        yield send({"step": "done"})
 
     return StreamingResponse(
         event_stream(),
