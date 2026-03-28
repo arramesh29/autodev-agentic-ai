@@ -20,6 +20,6 @@ def home():
 class RequirementRequest(BaseModel):
     requirement: str
 
-@app.post("/generate")
-def generate(req: RequirementRequest):
-    return {"result": run_workflow(req.requirement)}
+@app.post("/agent/run")
+def run_agent(request: AgentRequest):
+    return run_workflow(request.query)
