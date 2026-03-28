@@ -48,22 +48,27 @@ def stream_workflow(query: str):
     def event_stream():
         import time
         import json
-
+    
         def send(msg):
-            print("SENDING:", msg)  # 👈 DEBUG
+            print("SENDING:", msg)
             return f"data: {json.dumps(msg)}\n\n"
-
+    
         yield send({"step": "start"})
-        time.sleep(1)
-
+        time.sleep(0.5)   # 🔥 REQUIRED
+    
         yield send({"step": "middle"})
-        time.sleep(1)
-
+        time.sleep(0.5)
+    
         yield send({"step": "done"})
 
     return StreamingResponse(
         event_stream(),
-        media_type="text/event-stream"
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+        },
     )
 
 
