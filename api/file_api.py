@@ -3,8 +3,7 @@ import os
 
 router = APIRouter()
 
-BASE_DIR = os.getcwd()  # adjust if needed
-
+BASE_DIR = "C:/Users/rames/autodev_build"
 
 @router.get("/files/{filename}")
 def get_file(filename: str):
