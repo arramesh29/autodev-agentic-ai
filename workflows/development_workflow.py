@@ -17,24 +17,45 @@ from tools.confidence_scorer import compute_confidence
 def run_workflow(requirement):
 
     logs = []
+    structured_logs = []   # 🔥 NEW
 
     # Step 1: Create development plan
     plan = create_plan(requirement)
 
+    logs.append("📋 Plan created")
+    structured_logs.append({
+        "step": "planning",
+        "status": "success",
+        "output": plan
+    })
+
     # Step 2: Generate C++ code and tests
     result = generate_code(plan)
-
-    # Step 3: Extract files
     files = result.get("files", [])
 
     if not files:
-        return {"error": "No files generated"}
+        return {
+            "status": "error",
+            "action": "generate_code",
+            "data": None,
+            "logs": logs,
+            "structured_logs": structured_logs,
+            "error": "No files generated"
+        }
+
+    structured_logs.append({
+        "step": "code_generation",
+        "status": "success",
+        "file_count": len(files)
+    })
 
     # Step 4: Write files to disk
     write_files(files)
+    logs.append("📁 Files written")
 
     # Step 5: Generate CMake
     generate_cmake(files)
+    logs.append("⚙️ CMake generated")
 
     MAX_RETRIES = 5
 
@@ -42,6 +63,11 @@ def run_workflow(requirement):
     for attempt in range(MAX_RETRIES):
 
         logs.append(f"\n=== Attempt {attempt} ===")
+
+        structured_logs.append({
+            "step": "attempt",
+            "attempt_number": attempt
+        })
 
         output = build_and_test()
 
@@ -52,37 +78,54 @@ def run_workflow(requirement):
         logs.append(f"📊 Test Summary: {parsed}")
         logs.append(f"📈 Confidence Score: {confidence['confidence_score']}")
 
-        # ✅ SUCCESS CONDITION (STRICT)
+        structured_logs.append({
+            "step": "test_analysis",
+            "parsed": parsed,
+            "confidence": confidence
+        })
+
+        # ✅ SUCCESS CONDITION
         if confidence["status"] == "success":
             logs.append("✅ All tests passed with high confidence")
 
             return {
                 "status": "success",
-                "generated_files": [f["filename"] for f in files],
-                "test_summary": parsed,
-                "confidence": confidence,
-                "execution_log": logs
+                "action": "autodev_workflow",
+                "data": {
+                    "summary": "Code generated, tested, and validated successfully",
+                    "generated_files": [f["filename"] for f in files],
+                    "test_summary": parsed,
+                    "confidence": confidence,
+                    "attempts": attempt + 1
+                },
+                "logs": logs,
+                "structured_logs": structured_logs,
+                "error": None
             }
 
         # ❌ NO TESTS CASE
         if confidence["status"] == "no_tests":
             logs.append("❌ No tests were executed — retrying")
-        
-        # ❌ FAILURE CASE
+            reason = "No Tests Executed"
+
         else:
             logs.append("❌ Tests failed or insufficient confidence")
 
-        # 🔍 Better failure classification
-        if "error c" in output.lower() or "nmake" in output.lower():
-            reason = "Compilation/Build Error"
-        elif parsed["failed"] > 0:
-            reason = "Test Failure (Logic Error)"
-        else:
-            reason = "Unknown Issue"
+            if "error c" in output.lower() or "nmake" in output.lower():
+                reason = "Compilation/Build Error"
+            elif parsed["failed"] > 0:
+                reason = "Test Failure (Logic Error)"
+            else:
+                reason = "Unknown Issue"
 
         logs.append(f"🔍 Reason: {reason}")
 
-        # 👉 Add human-readable hints
+        structured_logs.append({
+            "step": "failure_analysis",
+            "reason": reason
+        })
+
+        # 👉 Human-readable hints
         if "shouldinitiatebraking" in output.lower():
             logs.append("👉 Braking condition logic incorrect")
 
@@ -94,18 +137,39 @@ def run_workflow(requirement):
         try:
             files = fix_code(output, files)
             write_files(files)
+
             logs.append("✅ Fix applied")
+
+            structured_logs.append({
+                "step": "debug",
+                "status": "fix_applied"
+            })
 
         except Exception as e:
             logs.append(f"❌ Debug agent failed: {str(e)}")
 
             return {
-                "status": "debug_failed",
-                "execution_log": logs
+                "status": "error",
+                "action": "debug_code",
+                "data": {
+                    "summary": "Debug agent failed",
+                    "generated_files": [f["filename"] for f in files]
+                },
+                "logs": logs,
+                "structured_logs": structured_logs,
+                "error": str(e)
             }
 
     # ❌ FINAL FAILURE
     return {
-        "status": "failed_after_retries",
-        "execution_log": logs
+        "status": "error",
+        "action": "autodev_workflow",
+        "data": {
+            "summary": "Failed after max retries",
+            "generated_files": [f["filename"] for f in files],
+            "attempts": MAX_RETRIES
+        },
+        "logs": logs,
+        "structured_logs": structured_logs,
+        "error": "Max retries exceeded"
     }
