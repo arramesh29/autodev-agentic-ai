@@ -48,18 +48,72 @@ def stream_workflow(query: str):
     def event_stream():
         import time
         import json
-    
-        def send(msg):
-            print("SENDING:", msg)
-            return f"data: {json.dumps(msg)}\n\n"
-    
-        yield send({"step": "start"})
-        time.sleep(0.5)   # 🔥 REQUIRED
-    
-        yield send({"step": "middle"})
-        time.sleep(0.5)
-    
-        yield send({"step": "done"})
+
+        def send(data):
+            print("SENDING:", data)
+            return f"data: {json.dumps(data)}\n\n"
+
+        try:
+            # 🚀 START
+            yield send({"step": "start"})
+            time.sleep(0.1)
+
+            # 📋 PLAN
+            plan = create_plan(query)
+            yield send({"step": "plan_created"})
+            time.sleep(0.1)
+
+            # 🧠 CODE GENERATION
+            result = generate_code(plan)
+            files = result.get("files", [])
+
+            yield send({
+                "step": "code_generated",
+                "files": [f["filename"] for f in files]
+            })
+            time.sleep(0.1)
+
+            # 💾 WRITE FILES
+            write_files(files)
+            generate_cmake(files)
+
+            MAX_RETRIES = 5
+
+            for attempt in range(MAX_RETRIES):
+
+                yield send({
+                    "step": "build_attempt",
+                    "attempt": attempt
+                })
+                time.sleep(0.1)
+
+                output = build_and_test()
+
+                parsed = parse_ctest_output(output)
+                confidence = compute_confidence(parsed)
+
+                yield send({
+                    "step": "test_result",
+                    "parsed": parsed,
+                    "confidence": confidence
+                })
+                time.sleep(0.1)
+
+                if confidence["status"] == "success":
+                    yield send({"step": "done"})
+                    return
+
+                # 🔧 DEBUG FIX LOOP
+                files = fix_code(output, files)
+                write_files(files)
+
+            yield send({"step": "failed"})
+
+        except Exception as e:
+            yield send({
+                "step": "error",
+                "message": str(e)
+            })
 
     return StreamingResponse(
         event_stream(),
@@ -67,10 +121,8 @@ def stream_workflow(query: str):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
         },
     )
-
 
 # 🚀 OPTIONAL: Keep existing batch API (if you have)
 @app.post("/agent/run")
