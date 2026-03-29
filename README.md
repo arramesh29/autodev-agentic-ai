@@ -32,6 +32,45 @@ This project implements a **production-grade Agentic AI system** that automates:
 API → Workflow → Agents → Tools → Build → Test → Debug Loop
 ```
 
+## 🧭 System Architecture (Mermaid)
+
+```mermaid
+flowchart TD
+
+    A[User Requirement] --> B[FastAPI Backend]
+
+    B --> C[Workflow Orchestrator]
+
+    C --> D[Planner Agent]
+    D --> E[Code Generation Agent]
+
+    E --> F[Generated C++ Code + Tests]
+
+    F --> G[CMake + Build Tool]
+    G --> H[Test Execution - CTest]
+
+    H --> I[Test Parser]
+    I --> J[Confidence Scorer]
+
+    J -->|Success| K[Return Output]
+
+    J -->|Failure| L[Debug Agent]
+
+    L --> M{Fix Strategy}
+    M -->|Fix Code| F
+    M -->|Fix Test| F
+    M -->|Fix Both| F
+
+    %% Streaming Layer
+    C --> N[Streaming API SSE]
+    N --> O[Frontend React UI]
+
+    O --> P[Live Logs]
+    O --> Q[Generated Files]
+    O --> R[File Viewer]
+```
+
+
 ### Components
 
 * **API Layer**
