@@ -6,8 +6,6 @@ from dotenv import load_dotenv
 
 import atexit
 
-atexit.register(langfuse.flush)
-
 load_dotenv()
 
 # Initialize Langfuse client
@@ -17,9 +15,7 @@ langfuse = Langfuse(
     host=os.getenv("LANGFUSE_BASE_URL")
 )
 
-print("LANGFUSE_PUBLIC_KEY:", os.getenv("LANGFUSE_PUBLIC_KEY"))
-print("LANGFUSE_SECRET_KEY:", os.getenv("LANGFUSE_SECRET_KEY"))
-print("LANGFUSE_HOST:", os.getenv("LANGFUSE_BASE_URL"))
+atexit.register(langfuse.flush)
 
 # Plain LLM (no callbacks anymore)
 llm = ChatOpenAI(
