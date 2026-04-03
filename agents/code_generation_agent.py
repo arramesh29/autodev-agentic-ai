@@ -4,7 +4,7 @@ import json
 
 def generate_code(spec, trace=None, parent_span=None):
 
-    # Create span for this agent
+    # SAFE span creation
     span = None
     if trace:
         span = (
@@ -58,26 +58,34 @@ def generate_code(spec, trace=None, parent_span=None):
     {spec}
     """
 
+    generation = None
+    text = None
+
     try:
-        # Attach LLM call to Langfuse trace
-        response = llm.invoke(
-            prompt,
-            metadata={
-                "langfuse_trace_id": trace.id if trace else None,
-                "langfuse_parent_observation_id": span.id if span else None,
-                "agent": "code_generation"
-            }
-        )
+        # Create generation ONLY if span exists
+        if span:
+            generation = span.generation(
+                name="llm_generate_code",
+                model="gpt-4o",
+                input=prompt
+            )
+
+        response = llm.invoke(prompt)
 
         text = response.content.strip()
 
+        # End generation with RAW output
+        if generation:
+            generation.end(
+                output=text[:2000]  # truncate for UI safety
+            )
+
         # Clean response
-        text = text.replace("```json", "")
-        text = text.replace("```", "")
+        cleaned = text.replace("```json", "").replace("```", "")
 
-        result = json.loads(text)
+        result = json.loads(cleaned)
 
-        # End span with output
+        # End span with structured output
         if span:
             span.end(
                 output={
@@ -88,11 +96,23 @@ def generate_code(spec, trace=None, parent_span=None):
         return result
 
     except Exception as e:
-        # Capture errors in Langfuse
+
+        # Ensure generation is closed even on failure
+        if generation:
+            generation.end(
+                level="ERROR",
+                status_message=str(e),
+                metadata={
+                    "raw_response": text[:2000] if text else "no response"
+                }
+            )
+
         if span:
             span.end(
                 level="ERROR",
                 status_message=str(e)
             )
 
-        raise ValueError(f"Invalid JSON from LLM:\n{text if 'text' in locals() else 'No response'}")
+        raise ValueError(
+            f"Invalid JSON from LLM:\n{text if text else 'No response'}"
+        )
