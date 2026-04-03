@@ -4,7 +4,7 @@ import json
 
 def fix_code(error_log, files, trace=None, parent_span=None):
 
-    # Create span for debug agent
+    # SAFE span creation
     span = None
     if trace:
         span = (
@@ -37,48 +37,67 @@ Return ONLY valid JSON:
 }}
 """
 
+    generation = None
+    text = None
+
     try:
-        # Attach LLM call to Langfuse trace
-        response = llm.invoke(
-            prompt,
-            metadata={
-                "langfuse_trace_id": trace.id if trace else None,
-                "langfuse_parent_observation_id": span.id if span else None,
-                "agent": "debug_agent"
-            }
-        )
+        # CREATE GENERATION (v4 way)
+        if span:
+            generation = span.generation(
+                name="llm_fix_code",
+                model="gpt-4o",
+                input=prompt,
+                metadata={
+                    "agent": "debug_agent"
+                }
+            )
+
+        response = llm.invoke(prompt)
 
         text = response.content.strip()
 
-        # Clean response
-        text = text.replace("```json", "").replace("```", "")
+        # END GENERATION (raw output)
+        if generation:
+            generation.end(
+                output=text[:2000]  # truncate for UI
+            )
 
-        parsed = json.loads(text)
+        # Clean response
+        cleaned = text.replace("```json", "").replace("```", "")
+
+        parsed = json.loads(cleaned)
 
         updated_files = parsed.get("files", [])
 
-        # End span with useful output
+        # End span with structured output
         if span:
             span.end(
                 output={
                     "files_updated": len(updated_files),
-                    "error_log_summary": error_log[:500]  # truncate for UI
+                    "error_log_summary": error_log[:500]
                 }
             )
 
         return updated_files
 
     except Exception as e:
-        # Proper error tracking
-        if span:
-            span.end(
+
+        # Ensure generation is closed even on failure
+        if generation:
+            generation.end(
                 level="ERROR",
                 status_message=str(e),
                 metadata={
-                    "raw_response": text if "text" in locals() else "no response"
+                    "raw_response": text[:2000] if text else "no response"
                 }
             )
 
+        if span:
+            span.end(
+                level="ERROR",
+                status_message=str(e)
+            )
+
         raise ValueError(
-            f"Debug agent failed to return valid JSON:\n{text if 'text' in locals() else 'No response'}"
+            f"Debug agent failed to return valid JSON:\n{text if text else 'No response'}"
         )
