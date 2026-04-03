@@ -61,6 +61,8 @@ def run_workflow(requirement):
         if not files:
             code_span.end(level="ERROR", status_message="No files generated")
 
+            langfuse.flush()
+            
             return {
                 "status": "error",
                 "action": "generate_code",
@@ -166,6 +168,8 @@ def run_workflow(requirement):
 
                 trace.end(output="success")
 
+                langfuse.flush()
+                
                 return {
                     "status": "success",
                     "action": "autodev_workflow",
@@ -233,6 +237,8 @@ def run_workflow(requirement):
             except Exception as e:
                 debug_span.end(level="ERROR", status_message=str(e))
 
+                langfuse.flush()
+
                 return {
                     "status": "error",
                     "action": "debug_code",
@@ -253,6 +259,8 @@ def run_workflow(requirement):
         # ❌ FINAL FAILURE
         # =========================
         trace.end(level="ERROR", status_message="Max retries exceeded")
+
+        langfuse.flush()
 
         return {
             "status": "error",
