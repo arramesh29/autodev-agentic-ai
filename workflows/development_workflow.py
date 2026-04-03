@@ -209,7 +209,12 @@ def run_workflow(requirement):
             debug_span = attempt_span.span(name="debug_fix")
 
             try:
-                files = fix_code(output, files)
+                files = fix_code(
+                                    output,
+                                    files,
+                                    trace=trace,
+                                    parent_span=debug_span
+                                )
                 write_files(files)
 
                 debug_span.end(output="fix_applied")
