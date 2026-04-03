@@ -3,7 +3,7 @@ from services.llm_service import llm
 
 def create_plan(requirement, trace=None, parent_span=None):
 
-    # Create span for planner agent
+    # SAFE span creation
     span = None
     if trace:
         span = (
@@ -19,32 +19,55 @@ def create_plan(requirement, trace=None, parent_span=None):
     {requirement}
     """
 
+    generation = None
+    output = None
+
     try:
-        # Attach LLM call to Langfuse trace
-        response = llm.invoke(
-            prompt,
-            config={
-                "metadata": {
-                    "langfuse_trace_id": trace.id if trace else None,
-                    "langfuse_parent_observation_id": span.id if span else None,
+        # CREATE GENERATION (v4 way)
+        if span:
+            generation = span.generation(
+                name="llm_create_plan",
+                model="gpt-4o",
+                input=prompt,
+                metadata={
                     "agent": "planner_agent"
                 }
-            }
-        )
+            )
+
+        response = llm.invoke(prompt)
 
         output = response.content
 
-        # End span with output
+        # END GENERATION (raw output)
+        if generation:
+            generation.end(
+                output=output[:2000]  # truncate for UI safety
+            )
+
+        # End span with structured output
         if span:
-            span.end(output=output[:1000])  # truncate for UI
+            span.end(
+                output=output[:1000]
+            )
 
         return output
 
     except Exception as e:
-        # Proper error tracking
+
+        # Ensure generation is closed even on failure
+        if generation:
+            generation.end(
+                level="ERROR",
+                status_message=str(e),
+                metadata={
+                    "raw_response": output[:2000] if output else "no response"
+                }
+            )
+
         if span:
             span.end(
                 level="ERROR",
                 status_message=str(e)
             )
+
         raise
