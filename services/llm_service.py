@@ -15,7 +15,7 @@ langfuse = Langfuse(
 
 print("LANGFUSE_PUBLIC_KEY:", os.getenv("LANGFUSE_PUBLIC_KEY"))
 print("LANGFUSE_SECRET_KEY:", os.getenv("LANGFUSE_SECRET_KEY"))
-print("LANGFUSE_HOST:", os.getenv("LANGFUSE_HOST"))
+print("LANGFUSE_HOST:", os.getenv("LANGFUSE_BASE_URL"))
 
 # Plain LLM (no callbacks anymore)
 llm = ChatOpenAI(
