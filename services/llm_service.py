@@ -4,6 +4,10 @@ from langfuse import Langfuse
 import os
 from dotenv import load_dotenv
 
+import atexit
+
+atexit.register(langfuse.flush)
+
 load_dotenv()
 
 # Initialize Langfuse client
