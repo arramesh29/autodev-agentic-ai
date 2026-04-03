@@ -35,7 +35,11 @@ def run_workflow(requirement):
         # =========================
         plan_span = trace.span(name="planning")
 
-        plan = create_plan(requirement)
+        plan = create_plan(
+                                requirement,
+                                trace=trace,
+                                parent_span=plan_span
+                            )
 
         plan_span.end(output=plan)
 
