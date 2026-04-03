@@ -1,7 +1,17 @@
 from services.llm_service import llm
 import json
 
-def generate_code(spec):
+
+def generate_code(spec, trace=None, parent_span=None):
+
+    # Create span for this agent
+    span = None
+    if trace:
+        span = (
+            parent_span.span(name="generate_code_agent")
+            if parent_span
+            else trace.span(name="generate_code_agent")
+        )
 
     prompt = f"""
     You are an automotive C++ software engineer.
@@ -48,17 +58,41 @@ def generate_code(spec):
     {spec}
     """
 
-    response = llm.invoke(prompt)
-    text = response.content.strip()
-
-    # Remove markdown if present
-    text = text.replace("```json", "")
-    text = text.replace("```", "")
-
     try:
+        # Attach LLM call to Langfuse trace
+        response = llm.invoke(
+            prompt,
+            metadata={
+                "langfuse_trace_id": trace.id if trace else None,
+                "langfuse_parent_observation_id": span.id if span else None,
+                "agent": "code_generation"
+            }
+        )
+
+        text = response.content.strip()
+
+        # Clean response
+        text = text.replace("```json", "")
+        text = text.replace("```", "")
+
         result = json.loads(text)
-    except Exception:
-        raise ValueError(f"Invalid JSON from LLM:\n{text}")
 
-    return result
+        # End span with output
+        if span:
+            span.end(
+                output={
+                    "file_count": len(result.get("files", []))
+                }
+            )
 
+        return result
+
+    except Exception as e:
+        # Capture errors in Langfuse
+        if span:
+            span.end(
+                level="ERROR",
+                status_message=str(e)
+            )
+
+        raise ValueError(f"Invalid JSON from LLM:\n{text if 'text' in locals() else 'No response'}")
