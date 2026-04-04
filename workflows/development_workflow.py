@@ -92,7 +92,15 @@ def run_workflow(requirement):
             confidence = compute_confidence(parsed)
 
             logs.append(f"📊 Test Summary: {parsed}")
-            logs.append(f"📈 Confidence Score: {confidence['confidence_score']}")
+            if isinstance(confidence, dict):
+                confidence_score = confidence.get("confidence_score", "N/A")
+                confidence_status = confidence.get("status", "unknown")
+            else:
+                confidence_score = "N/A"
+                confidence_status = "unknown"
+                logs.append("⚠️ Confidence returned invalid format")
+            
+            logs.append(f"📈 Confidence Score: {confidence_score}")
 
             # 🔥 FAILURE DETAILS
             if parsed.get("failed", 0) > 0:
@@ -102,8 +110,7 @@ def run_workflow(requirement):
             # =========================
             # ✅ SUCCESS
             # =========================
-            if confidence["status"] == "success":
-
+            if isinstance(confidence, dict) and confidence.get("status") == "success":
                 logs.append("✅ All tests passed")
 
                 trace.end(output="success")
