@@ -43,10 +43,15 @@ def write_files(files):
             errors.append(f"{filename}: {str(e)}")
 
     # 🔥 HARD FAIL (MANDATORY)
-    if valid_count == 0:
-        raise ValueError(
-            "🚨 CRITICAL: No valid files written.\n"
-            f"Errors: {errors}"
-        )
+        if valid_count == 0:
+            return {
+                "success": False,
+                "error": f"No valid files written. Errors: {errors}"
+            }
+        
+        return {
+            "success": True,
+            "count": valid_count
+        }
 
     return valid_count
