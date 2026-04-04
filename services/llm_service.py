@@ -1,21 +1,8 @@
 from langchain_openai import ChatOpenAI
-from langfuse import Langfuse
-
 import os
 from dotenv import load_dotenv
 
-import atexit
-
 load_dotenv()
-
-# Initialize Langfuse client
-langfuse = Langfuse(
-    public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
-    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
-    host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
-)
-
-atexit.register(langfuse.flush)
 
 # Plain LLM (no callbacks anymore)
 llm = ChatOpenAI(
