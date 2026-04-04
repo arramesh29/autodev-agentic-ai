@@ -26,7 +26,6 @@ def run_workflow(requirement):
     )
 
     logs = []
-    structured_logs = []
 
     try:
         # =========================
@@ -41,7 +40,6 @@ def run_workflow(requirement):
         )
 
         plan_span.end(output=plan)
-
         logs.append("📋 Plan created")
 
         # =========================
@@ -52,13 +50,13 @@ def run_workflow(requirement):
         result = generate_code(plan)
         files = result.get("files", [])
 
-        if not files:
-            code_span.end(level="ERROR", status_message="No files generated")
+        if not isinstance(files, list) or not files:
+            code_span.end(level="ERROR", status_message="Invalid files generated")
             langfuse.flush()
 
             return {
                 "status": "error",
-                "error": "No files generated",
+                "error": "No valid files generated",
                 "logs": logs
             }
 
@@ -71,7 +69,6 @@ def run_workflow(requirement):
         logs.append("⚙️ CMake generated")
 
         MAX_RETRIES = 5
-
         debug_loop_span = trace.span(name="debug_loop")
 
         for attempt in range(MAX_RETRIES):
@@ -89,28 +86,24 @@ def run_workflow(requirement):
             output = build_and_test()
 
             parsed = parse_ctest_output(output)
+            if not isinstance(parsed, dict):
+                parsed = {"failed": 1, "summary": "Invalid parser output"}
+
             confidence = compute_confidence(parsed)
+            if not isinstance(confidence, dict):
+                confidence = {"confidence_score": 0, "status": "retry"}
 
             logs.append(f"📊 Test Summary: {parsed}")
-            if isinstance(confidence, dict):
-                confidence_score = confidence.get("confidence_score", "N/A")
-                confidence_status = confidence.get("status", "unknown")
-            else:
-                confidence_score = "N/A"
-                confidence_status = "unknown"
-                logs.append("⚠️ Confidence returned invalid format")
-            
-            logs.append(f"📈 Confidence Score: {confidence_score}")
+            logs.append(f"📈 Confidence Score: {confidence.get('confidence_score')}")
 
-            # 🔥 FAILURE DETAILS
-            if isinstance(parsed, dict) and parsed.get("failed", 0) > 0:
+            if parsed.get("failed", 0) > 0:
                 logs.append("\n❌ FAILURE DETAILS")
                 logs.append(parsed.get("summary", "No detailed summary available"))
 
             # =========================
             # ✅ SUCCESS
             # =========================
-            if isinstance(confidence, dict) and confidence.get("status") == "success":
+            if confidence.get("status") == "success":
                 logs.append("✅ All tests passed")
 
                 trace.end(output="success")
@@ -124,7 +117,7 @@ def run_workflow(requirement):
             # =========================
             # 🔍 FAILURE REASON
             # =========================
-            if isinstance(parsed, dict) and parsed.get("failed", 0) > 0:
+            if parsed.get("failed", 0) > 0:
                 reason = "Test Failure"
             else:
                 reason = "Build Error"
@@ -132,7 +125,7 @@ def run_workflow(requirement):
             logs.append(f"🔍 Reason: {reason}")
 
             # =========================
-            # 🔧 DEBUG FIX (FIXED SECTION)
+            # 🔧 DEBUG FIX
             # =========================
             debug_span = attempt_span.span(name="debug_fix")
 
@@ -144,73 +137,52 @@ def run_workflow(requirement):
                     parent_span=debug_span
                 )
 
-                # 🔥 CRITICAL FIX: SAFE TYPE HANDLING
+                # ---------- SAFE EXTRACTION ----------
                 if isinstance(fix_result, dict):
-                updated_files = fix_result.get("files", [])
-                
-                # 🔥 NORMALIZE to list
-                if isinstance(updated_files, dict):
-                    updated_files = [updated_files]
-                
-                elif isinstance(updated_files, str):
-                    # completely invalid
-                    raise ValueError("LLM returned string instead of file structure")
-                
-                elif not isinstance(updated_files, list):
-                    raise ValueError(f"Unexpected files type: {type(updated_files)}")
+                    updated_files = fix_result.get("files", [])
                     debug_summary = fix_result.get("debug_summary", {})
-
                 elif isinstance(fix_result, list):
                     updated_files = fix_result
-                    debug_summary = {
-                        "root_cause": "Not provided",
-                        "fix": "Not provided"
-                    }
-
+                    debug_summary = {}
                 else:
                     raise ValueError(f"Unexpected fix_code return type: {type(fix_result)}")
 
-                # 🔥 EXTRA SAFETY
+                # ---------- NORMALIZATION ----------
+                if isinstance(updated_files, dict):
+                    updated_files = [updated_files]
+
                 if not isinstance(updated_files, list):
-                    raise ValueError("updated_files must be a list")
+                    raise ValueError(f"Invalid files type: {type(updated_files)}")
 
-                # 🔧 LOG DEBUG ACTION
-                logs.append("\n🔧 DEBUG ACTION")
-                
-                if isinstance(debug_summary, dict):
-                    root_cause = debug_summary.get("root_cause", "Not provided")
-                    fix_msg = debug_summary.get("fix", "Not provided")
-                else:
-                    root_cause = "Invalid debug summary format"
-                    fix_msg = "Invalid debug summary format"
-                    logs.append("⚠️ Debug summary malformed")
-                
-                logs.append(f"Root Cause: {root_cause}")
-                logs.append(f"Fix Applied: {fix_msg}")
-
-                # 🔥 VALIDATE FILE STRUCTURE
+                # ---------- VALIDATION ----------
                 validated_files = []
-                
                 for f in updated_files:
                     if isinstance(f, dict) and "filename" in f and "content" in f:
                         validated_files.append(f)
                     else:
-                        logs.append("⚠️ Invalid file format from debug agent, skipping entry")
-                
-                # 🔥 FAIL FAST if nothing valid
+                        logs.append("⚠️ Skipping invalid file entry")
+
                 if not validated_files:
                     raise ValueError("No valid files returned from debug agent")
-                
+
+                # ---------- DEBUG LOG ----------
+                logs.append("\n🔧 DEBUG ACTION")
+
+                if isinstance(debug_summary, dict):
+                    logs.append(f"Root Cause: {debug_summary.get('root_cause')}")
+                    logs.append(f"Fix Applied: {debug_summary.get('fix')}")
+                else:
+                    logs.append("Root Cause: N/A")
+                    logs.append("Fix Applied: N/A")
+
+                # ---------- APPLY FIX ----------
                 files = validated_files
-                
                 write_files(files)
 
                 debug_span.end(output="fix_applied")
-
                 logs.append("✅ Fix applied")
 
             except Exception as e:
-
                 debug_span.end(level="ERROR", status_message=str(e))
                 langfuse.flush()
 
