@@ -36,10 +36,10 @@ def run_workflow(requirement):
         plan_span = trace.span(name="planning")
 
         plan = create_plan(
-                                requirement,
-                                trace=trace,
-                                parent_span=plan_span
-                            )
+            requirement,
+            trace=trace,
+            parent_span=plan_span
+        )
 
         plan_span.end(output=plan)
 
@@ -62,7 +62,7 @@ def run_workflow(requirement):
             code_span.end(level="ERROR", status_message="No files generated")
 
             langfuse.flush()
-            
+
             return {
                 "status": "error",
                 "action": "generate_code",
@@ -150,6 +150,11 @@ def run_workflow(requirement):
             logs.append(f"📊 Test Summary: {parsed}")
             logs.append(f"📈 Confidence Score: {confidence['confidence_score']}")
 
+            # 🔥 NEW: failure visibility
+            if parsed.get("failed", 0) > 0:
+                logs.append("\n❌ FAILURE DETAILS")
+                logs.append(parsed.get("summary", "No detailed summary available"))
+
             structured_logs.append({
                 "step": "test_analysis",
                 "parsed": parsed,
@@ -169,7 +174,7 @@ def run_workflow(requirement):
                 trace.end(output="success")
 
                 langfuse.flush()
-                
+
                 return {
                     "status": "success",
                     "action": "autodev_workflow",
@@ -206,6 +211,11 @@ def run_workflow(requirement):
 
             logs.append(f"🔍 Reason: {reason}")
 
+            # 🔥 NEW: structured failure insight
+            if parsed.get("summary"):
+                logs.append("🧾 Failure Insight:")
+                logs.append(parsed["summary"])
+
             structured_logs.append({
                 "step": "failure_analysis",
                 "reason": reason
@@ -217,22 +227,35 @@ def run_workflow(requirement):
             debug_span = attempt_span.span(name="debug_fix")
 
             try:
-                files = fix_code(
-                                    output,
-                                    files,
-                                    trace=trace,
-                                    parent_span=debug_span
-                                )
+                fix_result = fix_code(
+                    parsed.get("summary", output),
+                    files,
+                    trace=trace,
+                    parent_span=debug_span
+                )
+
+                updated_files = fix_result.get("files", [])
+                debug_summary = fix_result.get("debug_summary", {})
+
+                # 🔥 NEW: Debug reasoning logs
+                logs.append("\n🔧 DEBUG ACTION")
+                logs.append(f"Root Cause: {debug_summary.get('root_cause')}")
+                logs.append(f"Fix Applied: {debug_summary.get('fix')}")
+
+                structured_logs.append({
+                    "step": "debug",
+                    "status": "fix_applied",
+                    "root_cause": debug_summary.get("root_cause"),
+                    "fix": debug_summary.get("fix")
+                })
+
+                files = updated_files
+
                 write_files(files)
 
                 debug_span.end(output="fix_applied")
 
                 logs.append("✅ Fix applied")
-
-                structured_logs.append({
-                    "step": "debug",
-                    "status": "fix_applied"
-                })
 
             except Exception as e:
                 debug_span.end(level="ERROR", status_message=str(e))
