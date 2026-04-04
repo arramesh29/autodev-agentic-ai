@@ -1,4 +1,4 @@
-import json
+import os
 from langfuse import Langfuse
 
 from agents.planner_agent import create_plan
@@ -33,6 +33,19 @@ def extract_files_recursively(obj):
     return extracted
 
 
+# 🔥 Clean generated folder (CRITICAL FIX)
+def clean_generated_folder():
+    output_dir = "generated"
+    if not os.path.exists(output_dir):
+        return
+
+    for f in os.listdir(output_dir):
+        try:
+            os.remove(os.path.join(output_dir, f))
+        except Exception:
+            pass
+
+
 def run_workflow(requirement):
 
     trace = langfuse.trace(
@@ -59,23 +72,47 @@ def run_workflow(requirement):
         logs.append("📋 Plan created")
 
         # =========================
-        # ⚙️ CODE GEN
+        # ⚙️ CODE GEN (WITH FIX)
         # =========================
         code_span = trace.span(name="code_generation")
 
-        result = generate_code(plan)
+        required_files = {
+            "aeb_controller.h",
+            "aeb_controller.cpp",
+            "test_aeb_controller.cpp"
+        }
 
-        if not isinstance(result, dict):
-            raise ValueError("generate_code returned invalid format")
+        MAX_GEN_RETRY = 2
+        files = []
 
-        files = extract_files_recursively(result.get("files", []))
+        for gen_attempt in range(MAX_GEN_RETRY):
+
+            result = generate_code(plan)
+
+            if not isinstance(result, dict):
+                raise ValueError("generate_code returned invalid format")
+
+            generated_files = extract_files_recursively(result.get("files", []))
+
+            returned_files = set(f["filename"] for f in generated_files)
+
+            missing = required_files - returned_files
+
+            if not missing:
+                files = generated_files
+                break
+
+            logs.append(f"⚠️ Generation attempt {gen_attempt} missing files: {missing}")
 
         if not files:
-            raise ValueError("No valid files from generate_code")
+            raise ValueError("❌ Code generation failed to produce all required files")
 
         code_span.end(output={"file_count": len(files)})
 
-        # 🔥 SAFE INITIAL WRITE (FIX 3)
+        # 🔥 CLEAN BEFORE WRITE (CRITICAL)
+        clean_generated_folder()
+
+        # 🔥 SAFE INITIAL WRITE
         write_result = write_files(files)
         if not write_result.get("success"):
             logs.append(f"⚠️ Initial write failed: {write_result.get('error')}")
@@ -94,7 +131,6 @@ def run_workflow(requirement):
 
             try:
                 logs.append(f"\n=== Attempt {attempt} ===")
-                logs.append(f"🔥 LOOP ENTERED attempt {attempt}")
 
                 # -------------------------
                 # BUILD + TEST
@@ -117,7 +153,7 @@ def run_workflow(requirement):
                     logs.append(parsed.get("summary"))
 
                 # -------------------------
-                # SUCCESS EXIT
+                # SUCCESS
                 # -------------------------
                 if confidence.get("status") == "success":
                     logs.append("✅ All tests passed")
@@ -130,7 +166,7 @@ def run_workflow(requirement):
                 logs.append("🔧 Debugging...")
 
                 # -------------------------
-                # DEBUG STEP
+                # DEBUG
                 # -------------------------
                 fix_result = fix_code(
                     parsed.get("summary", output),
@@ -138,9 +174,6 @@ def run_workflow(requirement):
                     trace=trace
                 )
 
-                # -------------------------
-                # EXTRACT FILES
-                # -------------------------
                 updated_files = extract_files_recursively(fix_result)
 
                 if not updated_files:
@@ -148,7 +181,7 @@ def run_workflow(requirement):
                     continue
 
                 # -------------------------
-                # NORMALIZE FILES
+                # NORMALIZE
                 # -------------------------
                 normalized_files = []
 
@@ -167,7 +200,9 @@ def run_workflow(requirement):
                     logs.append("⚠️ No valid normalized files")
                     continue
 
-                # 🔥 SAFE WRITE (FIX 2)
+                # 🔥 CLEAN + WRITE (CRITICAL)
+                clean_generated_folder()
+
                 write_result = write_files(normalized_files)
 
                 if not write_result.get("success"):
