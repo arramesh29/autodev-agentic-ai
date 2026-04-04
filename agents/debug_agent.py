@@ -35,14 +35,33 @@ Instructions:
 - root_cause: what caused the failure
 - fix: what changes you made
 
-Return ONLY valid JSON:
-{{
-  "files":[{{"filename":"...","content":"..."}}],
-  "debug_summary": {{
-      "root_cause": "...",
-      "fix": "..."
-  }}
-}}
+Return ONLY valid JSON.
+
+STRICT RULES:
+- "files" MUST be a list
+- Each item MUST contain:
+    - "filename": non-empty string with extension (.cpp/.h)
+    - "content": non-empty string
+- DO NOT return empty filename
+- DO NOT omit filename
+- DO NOT return null values
+- DO NOT return raw strings
+
+If fixing existing files:
+- Preserve SAME filenames
+- ONLY modify content
+
+Example:
+{
+  "files": [
+    {"filename": "aeb_controller.cpp", "content": "...fixed code..."},
+    {"filename": "aeb_controller.h", "content": "..."}
+  ],
+  "debug_summary": {
+    "root_cause": "...",
+    "fix": "..."
+  }
+}
 """
 
     generation = None
