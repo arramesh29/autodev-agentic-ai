@@ -130,39 +130,65 @@ def run_workflow(requirement):
             logs.append("🔧 Debugging...")
 
             # =========================
-            # 🔧 DEBUG FIX (FIXED)
+            # 🔧 DEBUG FIX (HARDENED)
             # =========================
             fix_result = fix_code(
                 parsed.get("summary", output),
                 files,
                 trace=trace
             )
-
+            
+            logs.append(f"🐞 Debug raw output: {fix_result}")
+            
+            # SAFE extraction
+            updated_files = []
+            
             if isinstance(fix_result, dict):
                 updated_files = fix_result.get("files", [])
+            elif isinstance(fix_result, list):
+                updated_files = fix_result
             else:
-                updated_files = []
-
-            # 🔥 NORMALIZE
-            if isinstance(updated_files, dict):
-                updated_files = [updated_files]
-
-            if not isinstance(updated_files, list):
-                updated_files = []
-
-            # 🔥 VALIDATE
-            validated_files = []
+                logs.append("⚠️ Debug agent returned invalid type")
+            
+            logs.append(f"📂 Debug files extracted: {updated_files}")
+            
+            # 🔥 NORMALIZE DEEPLY
+            normalized_files = []
+            
             for f in updated_files:
-                if isinstance(f, dict) and "filename" in f and "content" in f:
-                    validated_files.append(f)
-
-            # 🔥 FALLBACK (CRITICAL)
-            if not validated_files:
+            
+                # Case 1: already valid
+                if isinstance(f, dict):
+                    filename = f.get("filename")
+                    content = f.get("content")
+            
+                    if isinstance(filename, str) and filename.strip() and isinstance(content, str):
+                        normalized_files.append({
+                            "filename": filename.strip(),
+                            "content": content
+                        })
+                    else:
+                        logs.append(f"⚠️ Invalid dict file skipped: {f}")
+            
+                # Case 2: raw string (LLM mistake)
+                elif isinstance(f, str):
+                    logs.append("⚠️ Converting raw string to fallback file")
+            
+                    normalized_files.append({
+                        "filename": "recovered.cpp",
+                        "content": f
+                    })
+            
+                else:
+                    logs.append(f"⚠️ Unknown file format skipped: {f}")
+            
+            # 🔥 FINAL FALLBACK
+            if not normalized_files:
                 logs.append("⚠️ Debug agent failed, keeping previous files")
-                validated_files = files
-
-            files = validated_files
-
+                normalized_files = files
+            
+            files = normalized_files
+            
             write_files(files)
             logs.append("✅ Fix applied")
 
