@@ -133,25 +133,48 @@ def run_workflow(requirement):
                 logs.append(f"🚨 Debug agent failed: {str(e)}")
                 continue
 
-            # 🔥 HARD EXTRACTION (FIXES YOUR BUG)
-            if isinstance(fix_result, dict) and "files" in fix_result:
-                updated_files = fix_result["files"]
+            # =========================
+            # 🔥 ROBUST EXTRACTION (FINAL FIX)
+            # =========================
+
+            updated_files = []
+
+            if isinstance(fix_result, dict):
+
+                if "files" in fix_result:
+                    updated_files = fix_result["files"]
+
+                elif isinstance(fix_result.get("files"), list):
+                    updated_files = fix_result.get("files", [])
+
+                else:
+                    logs.append(f"🚨 Invalid fix_result structure: {fix_result}")
+                    continue
+
             else:
-                logs.append(f"🚨 Invalid fix_result structure: {fix_result}")
+                logs.append(f"🚨 Unexpected fix_result type: {type(fix_result)}")
                 continue
 
-            # 🔥 PREVENT NESTED STRUCTURE BUG
-            if isinstance(updated_files, dict) and "files" in updated_files:
-                updated_files = updated_files["files"]
-
-            if not isinstance(updated_files, list):
-                logs.append("⚠️ Debug files not list, skipping")
-                continue
-
-            # 🔥 STRICT NORMALIZATION
-            normalized_files = []
+            # 🔥 FLATTEN NESTED BUG
+            flattened_files = []
 
             for f in updated_files:
+
+                if isinstance(f, dict) and "files" in f:
+                    inner_files = f.get("files", [])
+                    if isinstance(inner_files, list):
+                        flattened_files.extend(inner_files)
+                    continue
+
+                flattened_files.append(f)
+
+            # =========================
+            # 🔥 STRICT NORMALIZATION
+            # =========================
+
+            normalized_files = []
+
+            for f in flattened_files:
 
                 if not isinstance(f, dict):
                     logs.append(f"⚠️ Skipping non-dict file: {f}")
@@ -174,10 +197,10 @@ def run_workflow(requirement):
                 })
 
             if not normalized_files:
-                logs.append("⚠️ No valid debug files, keeping previous")
+                logs.append("⚠️ No valid debug files after flattening, keeping previous")
                 continue
 
-            # 🔥 SAFE WRITE (CRITICAL FIX)
+            # 🔥 SAFE WRITE
             try:
                 write_files(normalized_files)
             except Exception as e:
