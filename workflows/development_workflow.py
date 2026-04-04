@@ -16,7 +16,7 @@ from tools.confidence_scorer import compute_confidence
 langfuse = Langfuse()
 
 
-# 🔥 Recursive extractor (handles ALL malformed LLM outputs)
+# 🔥 Recursive extractor
 def extract_files_recursively(obj):
     extracted = []
 
@@ -75,11 +75,10 @@ def run_workflow(requirement):
 
         code_span.end(output={"file_count": len(files)})
 
-        # 🔥 SAFE INITIAL WRITE (DO NOT BREAK FLOW)
-        try:
-            write_files(files)
-        except Exception as e:
-            logs.append(f"⚠️ Initial write failed, continuing: {e}")
+        # 🔥 SAFE INITIAL WRITE (FIX 3)
+        write_result = write_files(files)
+        if not write_result.get("success"):
+            logs.append(f"⚠️ Initial write failed: {write_result.get('error')}")
 
         generate_cmake(files)
 
@@ -87,7 +86,7 @@ def run_workflow(requirement):
         logs.append("⚙️ CMake generated")
 
         # =========================
-        # 🔁 RETRY LOOP (CRASH-PROOF)
+        # 🔁 RETRY LOOP
         # =========================
         MAX_RETRIES = 5
 
@@ -140,7 +139,7 @@ def run_workflow(requirement):
                 )
 
                 # -------------------------
-                # EXTRACT FILES SAFELY
+                # EXTRACT FILES
                 # -------------------------
                 updated_files = extract_files_recursively(fix_result)
 
@@ -168,19 +167,16 @@ def run_workflow(requirement):
                     logs.append("⚠️ No valid normalized files")
                     continue
 
-                # -------------------------
-                # SAFE WRITE (NEVER BREAK LOOP)
-                # -------------------------
-                try:
-                    write_files(normalized_files)
-                    files = normalized_files
-                    logs.append("✅ Fix applied")
+                # 🔥 SAFE WRITE (FIX 2)
+                write_result = write_files(normalized_files)
 
-                except Exception as write_error:
-                    logs.append(f"⚠️ Write failed: {write_error}")
+                if not write_result.get("success"):
+                    logs.append(f"⚠️ Write failed: {write_result.get('error')}")
                     continue
 
-            # 🔥 CRITICAL: LOOP NEVER BREAKS
+                files = normalized_files
+                logs.append("✅ Fix applied")
+
             except Exception as loop_error:
                 logs.append(f"🚨 Attempt {attempt} crashed: {loop_error}")
                 continue
