@@ -130,7 +130,7 @@ def run_workflow(requirement):
             logs.append("🔧 Debugging...")
 
             # =========================
-            # 🔧 DEBUG FIX (HARDENED)
+            # 🔧 DEBUG FIX (FINAL VERSION)
             # =========================
             fix_result = fix_code(
                 parsed.get("summary", output),
@@ -152,44 +152,58 @@ def run_workflow(requirement):
             
             logs.append(f"📂 Debug files extracted: {updated_files}")
             
-            # 🔥 NORMALIZE DEEPLY
+            # =========================
+            # 🔥 AUTO-REPAIR + NORMALIZE
+            # =========================
             normalized_files = []
             
-            for f in updated_files:
+            for idx, f in enumerate(updated_files):
             
-                # Case 1: already valid
+                # Case 1: dict
                 if isinstance(f, dict):
+            
                     filename = f.get("filename")
                     content = f.get("content")
             
-                    if isinstance(filename, str) and filename.strip() and isinstance(content, str):
-                        normalized_files.append({
-                            "filename": filename.strip(),
-                            "content": content
-                        })
-                    else:
-                        logs.append(f"⚠️ Invalid dict file skipped: {f}")
+                    # 🔥 AUTO-FIX filename
+                    if not filename or not isinstance(filename, str) or not filename.strip():
+                        logs.append(f"⚠️ Fixing missing filename for item {idx}")
+                        filename = f"recovered_{idx}.cpp"
+            
+                    # 🔥 VALIDATE content
+                    if not isinstance(content, str) or not content.strip():
+                        logs.append(f"⚠️ Skipping empty content for {filename}")
+                        continue
+            
+                    normalized_files.append({
+                        "filename": filename.strip(),
+                        "content": content
+                    })
             
                 # Case 2: raw string (LLM mistake)
                 elif isinstance(f, str):
-                    logs.append("⚠️ Converting raw string to fallback file")
+                    logs.append(f"⚠️ Converting raw string to file: recovered_{idx}.cpp")
             
                     normalized_files.append({
-                        "filename": "recovered.cpp",
+                        "filename": f"recovered_{idx}.cpp",
                         "content": f
                     })
             
                 else:
                     logs.append(f"⚠️ Unknown file format skipped: {f}")
             
+            # =========================
             # 🔥 FINAL FALLBACK
+            # =========================
             if not normalized_files:
                 logs.append("⚠️ Debug agent failed, keeping previous files")
                 normalized_files = files
             
             files = normalized_files
             
+            # WRITE UPDATED FILES
             write_files(files)
+            
             logs.append("✅ Fix applied")
 
         trace.end(level="ERROR", status_message="Max retries exceeded")
