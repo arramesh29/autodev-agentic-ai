@@ -19,7 +19,6 @@ langfuse = Langfuse()
 
 def run_workflow(requirement):
 
-    # Create ROOT TRACE
     trace = langfuse.trace(
         name="autodev_workflow",
         input={"requirement": requirement},
@@ -44,11 +43,6 @@ def run_workflow(requirement):
         plan_span.end(output=plan)
 
         logs.append("📋 Plan created")
-        structured_logs.append({
-            "step": "planning",
-            "status": "success",
-            "output": plan
-        })
 
         # =========================
         # ⚙️ STEP 2: CODE GENERATION
@@ -60,53 +54,24 @@ def run_workflow(requirement):
 
         if not files:
             code_span.end(level="ERROR", status_message="No files generated")
-
             langfuse.flush()
 
             return {
                 "status": "error",
-                "action": "generate_code",
-                "data": None,
-                "logs": logs,
-                "structured_logs": structured_logs,
-                "error": "No files generated"
+                "error": "No files generated",
+                "logs": logs
             }
 
         code_span.end(output={"file_count": len(files)})
 
-        structured_logs.append({
-            "step": "code_generation",
-            "status": "success",
-            "file_count": len(files)
-        })
-
-        # =========================
-        # 📁 FILE WRITE
-        # =========================
-        file_span = trace.span(name="file_write")
-
         write_files(files)
-
-        file_span.end()
-
-        logs.append("📁 Files written")
-
-        # =========================
-        # ⚙️ CMAKE GENERATION
-        # =========================
-        cmake_span = trace.span(name="cmake_generation")
-
         generate_cmake(files)
 
-        cmake_span.end()
-
+        logs.append("📁 Files written")
         logs.append("⚙️ CMake generated")
 
         MAX_RETRIES = 5
 
-        # =========================
-        # 🔁 DEBUG LOOP
-        # =========================
         debug_loop_span = trace.span(name="debug_loop")
 
         for attempt in range(MAX_RETRIES):
@@ -118,111 +83,49 @@ def run_workflow(requirement):
 
             logs.append(f"\n=== Attempt {attempt} ===")
 
-            structured_logs.append({
-                "step": "attempt",
-                "attempt_number": attempt
-            })
-
             # =========================
             # 🏗️ BUILD + TEST
             # =========================
-            build_span = attempt_span.span(name="build_and_test")
-
             output = build_and_test()
-
-            build_span.end(output=output)
-
-            # =========================
-            # 📊 TEST ANALYSIS
-            # =========================
-            analysis_span = attempt_span.span(name="test_analysis")
 
             parsed = parse_ctest_output(output)
             confidence = compute_confidence(parsed)
 
-            analysis_span.end(
-                output={
-                    "parsed": parsed,
-                    "confidence": confidence
-                }
-            )
-
             logs.append(f"📊 Test Summary: {parsed}")
             logs.append(f"📈 Confidence Score: {confidence['confidence_score']}")
 
-            # 🔥 NEW: failure visibility
+            # 🔥 FAILURE DETAILS
             if parsed.get("failed", 0) > 0:
                 logs.append("\n❌ FAILURE DETAILS")
                 logs.append(parsed.get("summary", "No detailed summary available"))
-
-            structured_logs.append({
-                "step": "test_analysis",
-                "parsed": parsed,
-                "confidence": confidence
-            })
 
             # =========================
             # ✅ SUCCESS
             # =========================
             if confidence["status"] == "success":
 
-                attempt_span.end(output="success")
-                debug_loop_span.end()
-
-                logs.append("✅ All tests passed with high confidence")
+                logs.append("✅ All tests passed")
 
                 trace.end(output="success")
-
                 langfuse.flush()
 
                 return {
                     "status": "success",
-                    "action": "autodev_workflow",
-                    "data": {
-                        "summary": "Code generated, tested, and validated successfully",
-                        "generated_files": [
-                            {
-                                "name": f["filename"],
-                                "type": f["filename"].split(".")[-1]
-                            }
-                            for f in files if "filename" in f
-                        ],
-                        "test_summary": parsed,
-                        "confidence": confidence,
-                        "attempts": attempt + 1
-                    },
-                    "logs": logs,
-                    "structured_logs": structured_logs,
-                    "error": None
+                    "logs": logs
                 }
 
             # =========================
-            # ❌ FAILURE ANALYSIS
+            # 🔍 FAILURE REASON
             # =========================
-            if confidence["status"] == "no_tests":
-                reason = "No Tests Executed"
+            if parsed["failed"] > 0:
+                reason = "Test Failure"
             else:
-                if "error c" in output.lower() or "nmake" in output.lower():
-                    reason = "Compilation/Build Error"
-                elif parsed["failed"] > 0:
-                    reason = "Test Failure (Logic Error)"
-                else:
-                    reason = "Unknown Issue"
+                reason = "Build Error"
 
             logs.append(f"🔍 Reason: {reason}")
 
-            # 🔥 NEW: structured failure insight
-            if parsed.get("summary"):
-                logs.append("🧾 Failure Insight:")
-                logs.append(parsed["summary"])
-
-            structured_logs.append({
-                "step": "failure_analysis",
-                "reason": reason
-            })
-
             # =========================
-            # 🔧 DEBUG FIX
+            # 🔧 DEBUG FIX (FIXED SECTION)
             # =========================
             debug_span = attempt_span.span(name="debug_fix")
 
@@ -234,23 +137,32 @@ def run_workflow(requirement):
                     parent_span=debug_span
                 )
 
-                updated_files = fix_result.get("files", [])
-                debug_summary = fix_result.get("debug_summary", {})
+                # 🔥 CRITICAL FIX: SAFE TYPE HANDLING
+                if isinstance(fix_result, dict):
+                    updated_files = fix_result.get("files", [])
+                    debug_summary = fix_result.get("debug_summary", {})
 
-                # 🔥 NEW: Debug reasoning logs
+                elif isinstance(fix_result, list):
+                    updated_files = fix_result
+                    debug_summary = {
+                        "root_cause": "Not provided",
+                        "fix": "Not provided"
+                    }
+
+                else:
+                    raise ValueError(f"Unexpected fix_code return type: {type(fix_result)}")
+
+                # 🔥 EXTRA SAFETY
+                if not isinstance(updated_files, list):
+                    raise ValueError("updated_files must be a list")
+
+                # 🔧 LOG DEBUG ACTION
                 logs.append("\n🔧 DEBUG ACTION")
                 logs.append(f"Root Cause: {debug_summary.get('root_cause')}")
                 logs.append(f"Fix Applied: {debug_summary.get('fix')}")
 
-                structured_logs.append({
-                    "step": "debug",
-                    "status": "fix_applied",
-                    "root_cause": debug_summary.get("root_cause"),
-                    "fix": debug_summary.get("fix")
-                })
-
+                # 🔄 APPLY FIX
                 files = updated_files
-
                 write_files(files)
 
                 debug_span.end(output="fix_applied")
@@ -258,44 +170,30 @@ def run_workflow(requirement):
                 logs.append("✅ Fix applied")
 
             except Exception as e:
-                debug_span.end(level="ERROR", status_message=str(e))
 
+                debug_span.end(level="ERROR", status_message=str(e))
                 langfuse.flush()
+
+                logs.append(f"❌ Debug Error: {str(e)}")
 
                 return {
                     "status": "error",
-                    "action": "debug_code",
-                    "data": {
-                        "summary": "Debug agent failed",
-                        "generated_files": [f["filename"] for f in files]
-                    },
-                    "logs": logs,
-                    "structured_logs": structured_logs,
-                    "error": str(e)
+                    "error": str(e),
+                    "logs": logs
                 }
 
             attempt_span.end()
-
-        debug_loop_span.end()
 
         # =========================
         # ❌ FINAL FAILURE
         # =========================
         trace.end(level="ERROR", status_message="Max retries exceeded")
-
         langfuse.flush()
 
         return {
             "status": "error",
-            "action": "autodev_workflow",
-            "data": {
-                "summary": "Failed after max retries",
-                "generated_files": [f["filename"] for f in files],
-                "attempts": MAX_RETRIES
-            },
-            "logs": logs,
-            "structured_logs": structured_logs,
-            "error": "Max retries exceeded"
+            "error": "Max retries exceeded",
+            "logs": logs
         }
 
     except Exception as e:
