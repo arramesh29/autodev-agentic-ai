@@ -41,6 +41,14 @@ Unit Test Requirements:
   - failure conditions
   - edge cases
 
+🚨 CRITICAL RULE:
+- You MUST generate ALL 3 files:
+  1. aeb_controller.h
+  2. aeb_controller.cpp
+  3. test_aeb_controller.cpp
+- Do NOT skip any file
+- Do NOT return partial output
+
 Return ONLY valid JSON.
 
 STRICT RULES:
@@ -51,17 +59,6 @@ STRICT RULES:
 - DO NOT return raw strings inside "files"
 - DO NOT return empty list
 - DO NOT omit filename or content
-
-INVALID examples (DO NOT DO):
-"files": ["some code"]
-"files": "string"
-"files": []
-
-VALID example:
-"files": [
-  {{"filename": "a.h", "content": "..."}},
-  {{"filename": "a.cpp", "content": "..."}}
-]
 
 Format:
 
@@ -100,12 +97,15 @@ Requirement:
         # =========================
         cleaned = text.replace("```json", "").replace("```", "")
 
-        # extract JSON block if extra text exists
         match = re.search(r"\{.*\}", cleaned, re.DOTALL)
         if not match:
             raise ValueError("No JSON object found in LLM output")
 
         json_str = match.group(0)
+
+        # 🔥 small safety cleanup (non-breaking)
+        json_str = re.sub(r",\s*}", "}", json_str)
+        json_str = re.sub(r",\s*]", "]", json_str)
 
         result = json.loads(json_str)
 
@@ -130,6 +130,22 @@ Requirement:
 
         if not validated_files:
             raise ValueError("No valid files returned from LLM")
+
+        # =========================
+        # 🔥 ENFORCE ALL FILES PRESENT (CRITICAL FIX)
+        # =========================
+        required_files = {
+            "aeb_controller.h",
+            "aeb_controller.cpp",
+            "test_aeb_controller.cpp"
+        }
+
+        returned_files = set(f["filename"] for f in validated_files)
+
+        missing_files = required_files - returned_files
+
+        if missing_files:
+            raise ValueError(f"Missing required files from LLM: {missing_files}")
 
         result["files"] = validated_files
 
