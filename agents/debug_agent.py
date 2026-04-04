@@ -14,7 +14,12 @@ def fix_code(error_log, files, trace=None, parent_span=None):
             else trace.span(name="fix_code_agent")
         )
 
-    # 🔥 ENHANCED PROMPT (non-breaking improvement)
+    # 🔥 Extract original filenames (CRITICAL)
+    original_filenames = set()
+    for f in files:
+        if isinstance(f, dict) and "filename" in f:
+            original_filenames.add(f["filename"])
+
     prompt = f"""
 You are a senior automotive C++ software engineer.
 
@@ -31,17 +36,16 @@ Instructions:
 - Fix failing test logic if present
 - Do NOT hardcode values just to pass tests
 - Maintain clean, production-quality C++ code
-- Ensure proper includes and correct formulas
+
+CRITICAL RULES:
+- You MUST return ALL input files
+- Do NOT drop any file
+- Modify only what is needed, but return everything
+- Ensure .h, .cpp, and test files are ALL present
 
 IMPORTANT:
-- If any identifier is undefined (e.g., kMinTTC, constants, variables), DEFINE it properly
-- Ensure header (.h) and source (.cpp) are consistent
-- Ensure all required constants, includes, and declarations exist
-- Return COMPLETE corrected files (not partial snippets)
-
-🔧 ALSO RETURN DEBUG SUMMARY:
-- root_cause: what caused the failure
-- fix: what changes you made
+- If any identifier is undefined (e.g., kMinTTC), DEFINE it
+- Ensure header and source consistency
 
 Return ONLY valid JSON:
 {{
@@ -57,7 +61,7 @@ Return ONLY valid JSON:
     text = None
 
     try:
-        # CREATE GENERATION (Langfuse)
+        # CREATE GENERATION
         if span:
             generation = span.generation(
                 name="llm_fix_code",
@@ -73,7 +77,7 @@ Return ONLY valid JSON:
             generation.end(output=text[:2000])
 
         # =========================
-        # 🔥 SAFE JSON EXTRACTION (slightly improved)
+        # JSON EXTRACTION
         # =========================
         cleaned = text.replace("```json", "").replace("```", "")
 
@@ -83,14 +87,14 @@ Return ONLY valid JSON:
 
         json_str = match.group(0)
 
-        # Extra safety: remove trailing commas (common LLM issue)
+        # Fix trailing commas
         json_str = re.sub(r",\s*}", "}", json_str)
         json_str = re.sub(r",\s*]", "]", json_str)
 
         parsed = json.loads(json_str)
 
         # =========================
-        # 🔥 VALIDATION (UNCHANGED)
+        # VALIDATION
         # =========================
         updated_files = parsed.get("files", [])
 
@@ -119,7 +123,20 @@ Return ONLY valid JSON:
             raise ValueError("Debug agent returned no valid files")
 
         # =========================
-        # DEBUG SUMMARY (UNCHANGED)
+        # 🔥 ENFORCE COMPLETENESS (CRITICAL FIX)
+        # =========================
+        returned_filenames = set(f["filename"] for f in validated_files)
+
+        missing_files = original_filenames - returned_filenames
+
+        if missing_files:
+            # 🔥 fallback: keep original content for missing files
+            for f in files:
+                if f["filename"] in missing_files:
+                    validated_files.append(f)
+
+        # =========================
+        # DEBUG SUMMARY
         # =========================
         debug_summary = parsed.get("debug_summary", {
             "root_cause": "Not provided",
@@ -127,7 +144,7 @@ Return ONLY valid JSON:
         })
 
         # =========================
-        # Langfuse span end
+        # TRACE END
         # =========================
         if span:
             span.end(
