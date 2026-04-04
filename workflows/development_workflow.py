@@ -16,7 +16,7 @@ from tools.confidence_scorer import compute_confidence
 langfuse = Langfuse()
 
 
-# 🔥 Recursive extractor (handles ALL bad LLM formats)
+# 🔥 Recursive extractor (handles ALL malformed LLM outputs)
 def extract_files_recursively(obj):
     extracted = []
 
@@ -75,8 +75,11 @@ def run_workflow(requirement):
 
         code_span.end(output={"file_count": len(files)})
 
-        # 🔥 INITIAL WRITE (fail-fast is OK here)
-        write_files(files)
+        # 🔥 SAFE INITIAL WRITE (DO NOT BREAK FLOW)
+        try:
+            write_files(files)
+        except Exception as e:
+            logs.append(f"⚠️ Initial write failed, continuing: {e}")
 
         generate_cmake(files)
 
@@ -84,92 +87,103 @@ def run_workflow(requirement):
         logs.append("⚙️ CMake generated")
 
         # =========================
-        # 🔁 LOOP (RESILIENT)
+        # 🔁 RETRY LOOP (CRASH-PROOF)
         # =========================
         MAX_RETRIES = 5
 
         for attempt in range(MAX_RETRIES):
 
-            logs.append(f"\n=== Attempt {attempt} ===")
-
-            output = build_and_test()
-
-            parsed = parse_ctest_output(output)
-            if not isinstance(parsed, dict):
-                parsed = {"failed": 1, "summary": "Invalid parser"}
-
-            confidence = compute_confidence(parsed)
-            if not isinstance(confidence, dict):
-                confidence = {"confidence_score": 0, "status": "retry"}
-
-            logs.append(f"📊 Test Summary: {parsed}")
-            logs.append(f"📈 Confidence Score: {confidence.get('confidence_score')}")
-
-            if parsed.get("failed", 0) > 0:
-                logs.append("\n❌ FAILURE DETAILS")
-                logs.append(parsed.get("summary"))
-
-            # ✅ SUCCESS EXIT
-            if confidence.get("status") == "success":
-                logs.append("✅ All tests passed")
-
-                trace.end(output="success")
-                langfuse.flush()
-
-                return {"status": "success", "logs": logs}
-
-            logs.append("🔧 Debugging...")
-
-            # =========================
-            # 🔧 DEBUG LOOP (FULLY SAFE)
-            # =========================
             try:
+                logs.append(f"\n=== Attempt {attempt} ===")
+                logs.append(f"🔥 LOOP ENTERED attempt {attempt}")
+
+                # -------------------------
+                # BUILD + TEST
+                # -------------------------
+                output = build_and_test()
+
+                parsed = parse_ctest_output(output)
+                if not isinstance(parsed, dict):
+                    parsed = {"failed": 1, "summary": "Invalid parser"}
+
+                confidence = compute_confidence(parsed)
+                if not isinstance(confidence, dict):
+                    confidence = {"confidence_score": 0, "status": "retry"}
+
+                logs.append(f"📊 Test Summary: {parsed}")
+                logs.append(f"📈 Confidence Score: {confidence.get('confidence_score')}")
+
+                if parsed.get("failed", 0) > 0:
+                    logs.append("\n❌ FAILURE DETAILS")
+                    logs.append(parsed.get("summary"))
+
+                # -------------------------
+                # SUCCESS EXIT
+                # -------------------------
+                if confidence.get("status") == "success":
+                    logs.append("✅ All tests passed")
+
+                    trace.end(output="success")
+                    langfuse.flush()
+
+                    return {"status": "success", "logs": logs}
+
+                logs.append("🔧 Debugging...")
+
+                # -------------------------
+                # DEBUG STEP
+                # -------------------------
                 fix_result = fix_code(
                     parsed.get("summary", output),
                     files,
                     trace=trace
                 )
 
-                # 🔥 Extract safely (handles nested garbage)
+                # -------------------------
+                # EXTRACT FILES SAFELY
+                # -------------------------
                 updated_files = extract_files_recursively(fix_result)
 
                 if not updated_files:
                     logs.append("⚠️ No valid debug files extracted")
                     continue
 
-                # 🔥 Normalize strictly
+                # -------------------------
+                # NORMALIZE FILES
+                # -------------------------
                 normalized_files = []
 
                 for f in updated_files:
-                    if not isinstance(f, dict):
-                        continue
+                    if isinstance(f, dict):
+                        filename = f.get("filename")
+                        content = f.get("content")
 
-                    filename = f.get("filename")
-                    content = f.get("content")
-
-                    if isinstance(filename, str) and filename.strip() and isinstance(content, str):
-                        normalized_files.append({
-                            "filename": filename.strip(),
-                            "content": content
-                        })
+                        if isinstance(filename, str) and filename.strip() and isinstance(content, str):
+                            normalized_files.append({
+                                "filename": filename.strip(),
+                                "content": content
+                            })
 
                 if not normalized_files:
                     logs.append("⚠️ No valid normalized files")
                     continue
 
-                # 🔥 CRITICAL: SAFE WRITE (DO NOT BREAK LOOP)
+                # -------------------------
+                # SAFE WRITE (NEVER BREAK LOOP)
+                # -------------------------
                 try:
                     write_files(normalized_files)
                     files = normalized_files
                     logs.append("✅ Fix applied")
 
                 except Exception as write_error:
-                    logs.append(f"⚠️ Write failed, skipping iteration: {write_error}")
+                    logs.append(f"⚠️ Write failed: {write_error}")
                     continue
 
-            except Exception as e:
-                logs.append(f"⚠️ Debug iteration failed: {str(e)}")
-                continue  # 🔥 NEVER BREAK LOOP
+            # 🔥 CRITICAL: LOOP NEVER BREAKS
+            except Exception as loop_error:
+                logs.append(f"🚨 Attempt {attempt} crashed: {loop_error}")
+                continue
 
         # =========================
         # ❌ MAX RETRIES
