@@ -5,43 +5,48 @@ def write_files(files):
 
     os.makedirs("generated", exist_ok=True)
 
-    # 🔥 NORMALIZE
+    # 🔥 STRICT INPUT VALIDATION
     if isinstance(files, dict):
         files = [files]
 
     if not isinstance(files, list):
-        print("⚠️ Invalid files input, skipping write")
-        return
+        raise ValueError(f"Invalid files input type: {type(files)}")
 
     valid_count = 0
+    errors = []
 
     for f in files:
 
         if not isinstance(f, dict):
-            print("⚠️ Skipping invalid file (not dict):", f)
+            errors.append(f"Not dict: {f}")
             continue
 
         filename = f.get("filename")
         content = f.get("content")
 
-        # 🔥 STRICT BUT SAFE VALIDATION
-        if not filename or not isinstance(filename, str):
-            print("⚠️ Invalid filename, skipping")
+        if not isinstance(filename, str) or not filename.strip():
+            errors.append(f"Invalid filename: {f}")
             continue
 
-        if content is None or not isinstance(content, str):
-            print("⚠️ Invalid content, skipping")
+        if not isinstance(content, str):
+            errors.append(f"Invalid content: {f}")
             continue
 
-        path = os.path.join("generated", filename)
+        path = os.path.join("generated", filename.strip())
 
         try:
-            with open(path, "w") as file:
+            with open(path, "w", encoding="utf-8") as file:
                 file.write(content)
             valid_count += 1
-        except Exception as e:
-            print("⚠️ Failed writing file:", e)
 
-    # 🔥 CRITICAL CHANGE: DO NOT CRASH
+        except Exception as e:
+            errors.append(f"{filename}: {str(e)}")
+
+    # 🔥 HARD FAIL (MANDATORY)
     if valid_count == 0:
-        print("⚠️ No valid files written — continuing without crash")
+        raise ValueError(
+            "🚨 CRITICAL: No valid files written.\n"
+            f"Errors: {errors}"
+        )
+
+    return valid_count
