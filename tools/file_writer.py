@@ -1,8 +1,15 @@
 import os
-
+import shutil
+import os
 
 def write_files(files):
 
+    # 🔥 CLEAR OLD FILES
+    output_dir = "generated"
+    
+    for f in os.listdir(output_dir):
+        os.remove(os.path.join(output_dir, f))
+    
     os.makedirs("generated", exist_ok=True)
 
     # 🔥 STRICT INPUT VALIDATION
