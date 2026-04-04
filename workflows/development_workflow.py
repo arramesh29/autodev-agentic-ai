@@ -12,20 +12,10 @@ from tools.build_tool import build_and_test
 from tools.test_parser import parse_ctest_output
 from tools.confidence_scorer import compute_confidence
 
-from dotenv import load_dotenv
 
-import atexit
+# Create SINGLE Langfuse client
+langfuse = Langfuse()
 
-load_dotenv()
-
-# Initialize Langfuse client
-langfuse = Langfuse(
-    public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
-    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
-    host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
-)
-
-atexit.register(langfuse.flush)
 
 def run_workflow(requirement):
 
