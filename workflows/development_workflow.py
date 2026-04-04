@@ -146,7 +146,18 @@ def run_workflow(requirement):
 
                 # 🔥 CRITICAL FIX: SAFE TYPE HANDLING
                 if isinstance(fix_result, dict):
-                    updated_files = fix_result.get("files", [])
+                updated_files = fix_result.get("files", [])
+                
+                # 🔥 NORMALIZE to list
+                if isinstance(updated_files, dict):
+                    updated_files = [updated_files]
+                
+                elif isinstance(updated_files, str):
+                    # completely invalid
+                    raise ValueError("LLM returned string instead of file structure")
+                
+                elif not isinstance(updated_files, list):
+                    raise ValueError(f"Unexpected files type: {type(updated_files)}")
                     debug_summary = fix_result.get("debug_summary", {})
 
                 elif isinstance(fix_result, list):
