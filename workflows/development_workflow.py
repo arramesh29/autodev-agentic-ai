@@ -133,25 +133,45 @@ def run_workflow(requirement):
                 logs.append(f"🚨 Debug agent failed: {str(e)}")
                 continue
 
-            updated_files = fix_result.get("files", [])
-
-            if not updated_files:
-                logs.append("⚠️ Debug agent returned empty files, skipping")
+            # 🔥 HARD EXTRACTION (FIXES YOUR BUG)
+            if isinstance(fix_result, dict) and "files" in fix_result:
+                updated_files = fix_result["files"]
+            else:
+                logs.append(f"🚨 Invalid fix_result structure: {fix_result}")
                 continue
 
-            # 🔥 STRICT VALIDATION AGAIN
+            # 🔥 PREVENT NESTED STRUCTURE BUG
+            if isinstance(updated_files, dict) and "files" in updated_files:
+                updated_files = updated_files["files"]
+
+            if not isinstance(updated_files, list):
+                logs.append("⚠️ Debug files not list, skipping")
+                continue
+
+            # 🔥 STRICT NORMALIZATION
             normalized_files = []
 
             for f in updated_files:
-                if isinstance(f, dict):
-                    filename = f.get("filename")
-                    content = f.get("content")
 
-                    if isinstance(filename, str) and filename.strip() and isinstance(content, str):
-                        normalized_files.append({
-                            "filename": filename.strip(),
-                            "content": content
-                        })
+                if not isinstance(f, dict):
+                    logs.append(f"⚠️ Skipping non-dict file: {f}")
+                    continue
+
+                filename = f.get("filename")
+                content = f.get("content")
+
+                if not isinstance(filename, str) or not filename.strip():
+                    logs.append(f"⚠️ Invalid filename skipped: {f}")
+                    continue
+
+                if not isinstance(content, str):
+                    logs.append(f"⚠️ Invalid content skipped: {f}")
+                    continue
+
+                normalized_files.append({
+                    "filename": filename.strip(),
+                    "content": content
+                })
 
             if not normalized_files:
                 logs.append("⚠️ No valid debug files, keeping previous")
