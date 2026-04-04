@@ -1,5 +1,6 @@
 from services.llm_service import llm
 import json
+import re
 
 
 def fix_code(error_log, files, trace=None, parent_span=None):
@@ -35,33 +36,14 @@ Instructions:
 - root_cause: what caused the failure
 - fix: what changes you made
 
-Return ONLY valid JSON.
-
-STRICT RULES:
-- "files" MUST be a list
-- Each item MUST contain:
-    - "filename": non-empty string with extension (.cpp/.h)
-    - "content": non-empty string
-- DO NOT return empty filename
-- DO NOT omit filename
-- DO NOT return null values
-- DO NOT return raw strings
-
-If fixing existing files:
-- Preserve SAME filenames
-- ONLY modify content
-
-Example:
-{
-  "files": [
-    {"filename": "aeb_controller.cpp", "content": "...fixed code..."},
-    {"filename": "aeb_controller.h", "content": "..."}
-  ],
-  "debug_summary": {
-    "root_cause": "...",
-    "fix": "..."
-  }
-}
+Return ONLY valid JSON:
+{{
+  "files":[{{"filename":"...","content":"..."}}],
+  "debug_summary": {{
+      "root_cause": "...",
+      "fix": "..."
+  }}
+}}
 """
 
     generation = None
@@ -80,37 +62,72 @@ Example:
         response = llm.invoke(prompt)
         text = response.content.strip()
 
-        # END GENERATION (raw output)
         if generation:
-            generation.end(
-                output=text[:2000]
-            )
+            generation.end(output=text[:2000])
 
-        # Clean response
+        # =========================
+        # 🔥 SAFE JSON EXTRACTION
+        # =========================
         cleaned = text.replace("```json", "").replace("```", "")
 
-        parsed = json.loads(cleaned)
+        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+        if not match:
+            raise ValueError("No JSON object found in debug agent output")
 
+        json_str = match.group(0)
+        parsed = json.loads(json_str)
+
+        # =========================
+        # 🔥 VALIDATION (CRITICAL)
+        # =========================
         updated_files = parsed.get("files", [])
 
-        # Extract debug summary safely
+        if isinstance(updated_files, dict):
+            updated_files = [updated_files]
+
+        if not isinstance(updated_files, list):
+            raise ValueError("files must be a list")
+
+        validated_files = []
+
+        for f in updated_files:
+            if not isinstance(f, dict):
+                continue
+
+            filename = f.get("filename")
+            content = f.get("content")
+
+            if isinstance(filename, str) and filename.strip() and isinstance(content, str):
+                validated_files.append({
+                    "filename": filename.strip(),
+                    "content": content
+                })
+
+        if not validated_files:
+            raise ValueError("Debug agent returned no valid files")
+
+        # =========================
+        # DEBUG SUMMARY
+        # =========================
         debug_summary = parsed.get("debug_summary", {
             "root_cause": "Not provided",
             "fix": "Not provided"
         })
 
-        # End span with structured output
+        # =========================
+        # Langfuse span end
+        # =========================
         if span:
             span.end(
                 output={
-                    "files_updated": len(updated_files),
+                    "files_updated": len(validated_files),
                     "root_cause": debug_summary.get("root_cause"),
                     "fix": debug_summary.get("fix")
                 }
             )
 
         return {
-            "files": updated_files,
+            "files": validated_files,
             "debug_summary": debug_summary
         }
 
