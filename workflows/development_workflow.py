@@ -16,16 +16,13 @@ from tools.confidence_scorer import compute_confidence
 langfuse = Langfuse()
 
 
-# 🔥 FINAL FIX: recursive extractor
+# 🔥 Recursive extractor (handles ALL bad LLM formats)
 def extract_files_recursively(obj):
     extracted = []
 
     if isinstance(obj, dict):
-        # valid file
         if "filename" in obj and "content" in obj:
             extracted.append(obj)
-
-        # nested structure
         elif "files" in obj:
             extracted.extend(extract_files_recursively(obj["files"]))
 
@@ -71,21 +68,14 @@ def run_workflow(requirement):
         if not isinstance(result, dict):
             raise ValueError("generate_code returned invalid format")
 
-        files = result.get("files", [])
+        files = extract_files_recursively(result.get("files", []))
 
-        if not isinstance(files, list):
-            raise ValueError("files must be list")
-
-        validated_files = extract_files_recursively(files)
-
-        if not validated_files:
+        if not files:
             raise ValueError("No valid files from generate_code")
-
-        files = validated_files
 
         code_span.end(output={"file_count": len(files)})
 
-        # 🔥 STRICT WRITE
+        # 🔥 INITIAL WRITE (fail-fast is OK here)
         write_files(files)
 
         generate_cmake(files)
@@ -94,7 +84,7 @@ def run_workflow(requirement):
         logs.append("⚙️ CMake generated")
 
         # =========================
-        # 🔁 LOOP
+        # 🔁 LOOP (RESILIENT)
         # =========================
         MAX_RETRIES = 5
 
@@ -119,7 +109,7 @@ def run_workflow(requirement):
                 logs.append("\n❌ FAILURE DETAILS")
                 logs.append(parsed.get("summary"))
 
-            # ✅ SUCCESS
+            # ✅ SUCCESS EXIT
             if confidence.get("status") == "success":
                 logs.append("✅ All tests passed")
 
@@ -131,7 +121,7 @@ def run_workflow(requirement):
             logs.append("🔧 Debugging...")
 
             # =========================
-            # 🔧 DEBUG FIX
+            # 🔧 DEBUG LOOP (FULLY SAFE)
             # =========================
             try:
                 fix_result = fix_code(
@@ -139,48 +129,51 @@ def run_workflow(requirement):
                     files,
                     trace=trace
                 )
-            except Exception as e:
-                logs.append(f"🚨 Debug agent failed: {str(e)}")
-                continue
 
-            # 🔥 FINAL EXTRACTION (BULLETPROOF)
-            updated_files = extract_files_recursively(fix_result)
+                # 🔥 Extract safely (handles nested garbage)
+                updated_files = extract_files_recursively(fix_result)
 
-            if not updated_files:
-                logs.append("⚠️ No valid debug files extracted, skipping")
-                continue
-
-            # 🔥 STRICT NORMALIZATION
-            normalized_files = []
-
-            for f in updated_files:
-                if not isinstance(f, dict):
+                if not updated_files:
+                    logs.append("⚠️ No valid debug files extracted")
                     continue
 
-                filename = f.get("filename")
-                content = f.get("content")
+                # 🔥 Normalize strictly
+                normalized_files = []
 
-                if isinstance(filename, str) and filename.strip() and isinstance(content, str):
-                    normalized_files.append({
-                        "filename": filename.strip(),
-                        "content": content
-                    })
+                for f in updated_files:
+                    if not isinstance(f, dict):
+                        continue
 
-            if not normalized_files:
-                logs.append("⚠️ No valid debug files after normalization, skipping")
-                continue
+                    filename = f.get("filename")
+                    content = f.get("content")
 
-            # 🔥 SAFE WRITE
-            try:
-                write_files(normalized_files)
+                    if isinstance(filename, str) and filename.strip() and isinstance(content, str):
+                        normalized_files.append({
+                            "filename": filename.strip(),
+                            "content": content
+                        })
+
+                if not normalized_files:
+                    logs.append("⚠️ No valid normalized files")
+                    continue
+
+                # 🔥 CRITICAL: SAFE WRITE (DO NOT BREAK LOOP)
+                try:
+                    write_files(normalized_files)
+                    files = normalized_files
+                    logs.append("✅ Fix applied")
+
+                except Exception as write_error:
+                    logs.append(f"⚠️ Write failed, skipping iteration: {write_error}")
+                    continue
+
             except Exception as e:
-                logs.append(f"🚨 Fix write failed: {str(e)}")
-                continue
+                logs.append(f"⚠️ Debug iteration failed: {str(e)}")
+                continue  # 🔥 NEVER BREAK LOOP
 
-            files = normalized_files
-
-            logs.append("✅ Fix applied")
-
+        # =========================
+        # ❌ MAX RETRIES
+        # =========================
         trace.end(level="ERROR", status_message="Max retries exceeded")
         langfuse.flush()
 
