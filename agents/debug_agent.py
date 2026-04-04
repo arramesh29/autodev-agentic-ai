@@ -31,9 +31,17 @@ Instructions:
 - Maintain clean, production-quality C++ code
 - Ensure proper includes and correct formulas
 
+🔧 ALSO RETURN DEBUG SUMMARY:
+- root_cause: what caused the failure
+- fix: what changes you made
+
 Return ONLY valid JSON:
 {{
-  "files":[{{"filename":"...","content":"..."}}]
+  "files":[{{"filename":"...","content":"..."}}],
+  "debug_summary": {{
+      "root_cause": "...",
+      "fix": "..."
+  }}
 }}
 """
 
@@ -41,25 +49,22 @@ Return ONLY valid JSON:
     text = None
 
     try:
-        # CREATE GENERATION (v4 way)
+        # CREATE GENERATION (Langfuse)
         if span:
             generation = span.generation(
                 name="llm_fix_code",
                 model="gpt-4o",
                 input=prompt,
-                metadata={
-                    "agent": "debug_agent"
-                }
+                metadata={"agent": "debug_agent"}
             )
 
         response = llm.invoke(prompt)
-
         text = response.content.strip()
 
         # END GENERATION (raw output)
         if generation:
             generation.end(
-                output=text[:2000]  # truncate for UI
+                output=text[:2000]
             )
 
         # Clean response
@@ -69,20 +74,29 @@ Return ONLY valid JSON:
 
         updated_files = parsed.get("files", [])
 
+        # Extract debug summary safely
+        debug_summary = parsed.get("debug_summary", {
+            "root_cause": "Not provided",
+            "fix": "Not provided"
+        })
+
         # End span with structured output
         if span:
             span.end(
                 output={
                     "files_updated": len(updated_files),
-                    "error_log_summary": error_log[:500]
+                    "root_cause": debug_summary.get("root_cause"),
+                    "fix": debug_summary.get("fix")
                 }
             )
 
-        return updated_files
+        return {
+            "files": updated_files,
+            "debug_summary": debug_summary
+        }
 
     except Exception as e:
 
-        # Ensure generation is closed even on failure
         if generation:
             generation.end(
                 level="ERROR",
