@@ -17,13 +17,6 @@ def write_files(files):
         if item.lower() == "cmakelists.txt":
             continue
 
-        # delete only source/test files
-        if item.endswith((".cpp", ".h", ".txt")):
-            try:
-                os.remove(path)
-            except Exception as e:
-                print(f"⚠️ Could not remove {path}: {e}")
-
     # =========================
     # 🔥 INPUT VALIDATION
     # =========================
