@@ -14,7 +14,7 @@ def fix_code(error_log, files, trace=None, parent_span=None):
             else trace.span(name="fix_code_agent")
         )
 
-    # 🔥 Extract original filenames (CRITICAL)
+    # Extract original filenames
     original_filenames = set()
     for f in files:
         if isinstance(f, dict) and "filename" in f:
@@ -23,31 +23,22 @@ def fix_code(error_log, files, trace=None, parent_span=None):
     prompt = f"""
 You are a senior automotive C++ software engineer.
 
-The system failed during build or test execution.
+The system failed.
 
-ERROR / TEST OUTPUT:
+ERROR:
 {error_log}
 
 FILES:
 {files}
 
-Instructions:
-- Fix compilation errors if present
-- Fix failing test logic if present
-- Do NOT hardcode values just to pass tests
-- Maintain clean, production-quality C++ code
+CRITICAL:
+- You MUST FIX the issue
+- You MUST modify the code
+- Do NOT return the same code again
+- Handle edge cases like infinity / NaN properly
+- Ensure all files are returned
 
-CRITICAL RULES:
-- You MUST return ALL input files
-- Do NOT drop any file
-- Modify only what is needed, but return everything
-- Ensure .h, .cpp, and test files are ALL present
-
-IMPORTANT:
-- If any identifier is undefined (e.g., kMinTTC), DEFINE it
-- Ensure header and source consistency
-
-Return ONLY valid JSON:
+Return ONLY JSON:
 {{
   "files":[{{"filename":"...","content":"..."}}],
   "debug_summary": {{
@@ -61,7 +52,6 @@ Return ONLY valid JSON:
     text = None
 
     try:
-        # CREATE GENERATION
         if span:
             generation = span.generation(
                 name="llm_fix_code",
@@ -70,8 +60,27 @@ Return ONLY valid JSON:
                 metadata={"agent": "debug_agent"}
             )
 
-        response = llm.invoke(prompt)
-        text = response.content.strip()
+        # =========================
+        # 🔥 LLM CALL WITH RETRY
+        # =========================
+        MAX_LLM_RETRY = 2
+
+        for attempt in range(MAX_LLM_RETRY):
+            response = llm.invoke(prompt)
+
+            if not response or not hasattr(response, "content"):
+                continue
+
+            text = response.content.strip()
+
+            # 🔥 Reject weak responses
+            if not text or len(text) < 50:
+                continue
+
+            break
+
+        if not text:
+            raise ValueError("LLM returned empty/invalid response")
 
         if generation:
             generation.end(output=text[:2000])
@@ -87,7 +96,6 @@ Return ONLY valid JSON:
 
         json_str = match.group(0)
 
-        # Fix trailing commas
         json_str = re.sub(r",\s*}", "}", json_str)
         json_str = re.sub(r",\s*]", "]", json_str)
 
@@ -123,29 +131,36 @@ Return ONLY valid JSON:
             raise ValueError("Debug agent returned no valid files")
 
         # =========================
-        # 🔥 ENFORCE COMPLETENESS (CRITICAL FIX)
+        # 🔥 ENSURE ACTUAL CHANGE
+        # =========================
+        old_map = {f["filename"]: f["content"] for f in files}
+        new_map = {f["filename"]: f["content"] for f in validated_files}
+
+        no_change = True
+        for k in old_map:
+            if k not in new_map or old_map[k] != new_map[k]:
+                no_change = False
+                break
+
+        if no_change:
+            raise ValueError("LLM returned identical code (no fix applied)")
+
+        # =========================
+        # COMPLETENESS
         # =========================
         returned_filenames = set(f["filename"] for f in validated_files)
-
         missing_files = original_filenames - returned_filenames
 
         if missing_files:
-            # 🔥 fallback: keep original content for missing files
             for f in files:
                 if f["filename"] in missing_files:
                     validated_files.append(f)
 
-        # =========================
-        # DEBUG SUMMARY
-        # =========================
         debug_summary = parsed.get("debug_summary", {
             "root_cause": "Not provided",
             "fix": "Not provided"
         })
 
-        # =========================
-        # TRACE END
-        # =========================
         if span:
             span.end(
                 output={
@@ -178,5 +193,5 @@ Return ONLY valid JSON:
             )
 
         raise ValueError(
-            f"Debug agent failed to return valid JSON:\n{text if text else 'No response'}"
+            f"Debug agent failed:\n{text if text else 'No response'}"
         )
