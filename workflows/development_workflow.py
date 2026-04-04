@@ -168,8 +168,21 @@ def run_workflow(requirement):
                 logs.append(f"Root Cause: {debug_summary.get('root_cause')}")
                 logs.append(f"Fix Applied: {debug_summary.get('fix')}")
 
-                # 🔄 APPLY FIX
-                files = updated_files
+                # 🔥 VALIDATE FILE STRUCTURE
+                validated_files = []
+                
+                for f in updated_files:
+                    if isinstance(f, dict) and "filename" in f and "content" in f:
+                        validated_files.append(f)
+                    else:
+                        logs.append("⚠️ Invalid file format from debug agent, skipping entry")
+                
+                # 🔥 FAIL FAST if nothing valid
+                if not validated_files:
+                    raise ValueError("No valid files returned from debug agent")
+                
+                files = validated_files
+                
                 write_files(files)
 
                 debug_span.end(output="fix_applied")
