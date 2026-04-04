@@ -40,19 +40,38 @@ def generate_code(spec, trace=None, parent_span=None):
       - failure conditions
       - edge cases
 
-    Return ONLY valid JSON.
-    Do not include explanations.
-    Do not include markdown.
+        Return ONLY valid JSON.
+        
+        STRICT RULES:
+        - "files" MUST be a list
+        - Each item MUST be an object with:
+            - "filename": string
+            - "content": string
+        - DO NOT return raw strings inside "files"
+        - DO NOT return empty list
+        - DO NOT omit filename or content
+        - If unsure, still generate valid placeholder files
+        
+        INVALID examples (DO NOT DO):
+        "files": ["some code"]
+        "files": "string"
+        "files": []
+        
+        VALID example:
+        "files": [
+          {"filename": "a.h", "content": "..."},
+          {"filename": "a.cpp", "content": "..."}
+        ]
 
-    Format:
-
-    {{
-      "files":[
-        {{"filename":"aeb_controller.h","content":"header code"}},
-        {{"filename":"aeb_controller.cpp","content":"implementation"}},
-        {{"filename":"test_aeb_controller.cpp","content":"GoogleTest code"}}
-      ]
-    }}
+        Format:
+    
+        {{
+          "files":[
+            {{"filename":"aeb_controller.h","content":"header code"}},
+            {{"filename":"aeb_controller.cpp","content":"implementation"}},
+            {{"filename":"test_aeb_controller.cpp","content":"GoogleTest code"}}
+          ]
+        }}
 
     Requirement:
     {spec}
