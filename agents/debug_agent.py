@@ -14,6 +14,7 @@ def fix_code(error_log, files, trace=None, parent_span=None):
             else trace.span(name="fix_code_agent")
         )
 
+    # 🔥 ENHANCED PROMPT (non-breaking improvement)
     prompt = f"""
 You are a senior automotive C++ software engineer.
 
@@ -31,6 +32,12 @@ Instructions:
 - Do NOT hardcode values just to pass tests
 - Maintain clean, production-quality C++ code
 - Ensure proper includes and correct formulas
+
+IMPORTANT:
+- If any identifier is undefined (e.g., kMinTTC, constants, variables), DEFINE it properly
+- Ensure header (.h) and source (.cpp) are consistent
+- Ensure all required constants, includes, and declarations exist
+- Return COMPLETE corrected files (not partial snippets)
 
 🔧 ALSO RETURN DEBUG SUMMARY:
 - root_cause: what caused the failure
@@ -66,7 +73,7 @@ Return ONLY valid JSON:
             generation.end(output=text[:2000])
 
         # =========================
-        # 🔥 SAFE JSON EXTRACTION
+        # 🔥 SAFE JSON EXTRACTION (slightly improved)
         # =========================
         cleaned = text.replace("```json", "").replace("```", "")
 
@@ -75,10 +82,15 @@ Return ONLY valid JSON:
             raise ValueError("No JSON object found in debug agent output")
 
         json_str = match.group(0)
+
+        # Extra safety: remove trailing commas (common LLM issue)
+        json_str = re.sub(r",\s*}", "}", json_str)
+        json_str = re.sub(r",\s*]", "]", json_str)
+
         parsed = json.loads(json_str)
 
         # =========================
-        # 🔥 VALIDATION (CRITICAL)
+        # 🔥 VALIDATION (UNCHANGED)
         # =========================
         updated_files = parsed.get("files", [])
 
@@ -107,7 +119,7 @@ Return ONLY valid JSON:
             raise ValueError("Debug agent returned no valid files")
 
         # =========================
-        # DEBUG SUMMARY
+        # DEBUG SUMMARY (UNCHANGED)
         # =========================
         debug_summary = parsed.get("debug_summary", {
             "root_cause": "Not provided",
