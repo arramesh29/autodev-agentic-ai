@@ -49,6 +49,29 @@ def run_workflow(requirement):
 
         result = generate_code(plan)
         files = result.get("files", [])
+        
+        # 🔥 NORMALIZE (CRITICAL FIX)
+        if isinstance(files, dict):
+            files = [files]
+        
+        elif isinstance(files, str):
+            raise ValueError("generate_code returned string instead of files")
+        
+        elif not isinstance(files, list):
+            raise ValueError(f"Unexpected files type: {type(files)}")
+        
+        # 🔥 VALIDATE
+        validated_files = []
+        for f in files:
+            if isinstance(f, dict) and "filename" in f and "content" in f:
+                validated_files.append(f)
+            else:
+                logs.append("⚠️ Invalid file from generate_code skipped")
+        
+        if not validated_files:
+            raise ValueError("No valid files from generate_code")
+        
+        files = validated_files
 
         if not isinstance(files, list) or not files:
             code_span.end(level="ERROR", status_message="Invalid files generated")
