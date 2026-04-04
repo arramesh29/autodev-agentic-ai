@@ -42,49 +42,42 @@ def run_workflow(requirement):
         logs.append("📋 Plan created")
 
         # =========================
-        # ⚙️ CODE GEN (FIXED)
+        # ⚙️ CODE GEN
         # =========================
         code_span = trace.span(name="code_generation")
 
         result = generate_code(plan)
 
-        # 🔥 SAFE ACCESS
-        if isinstance(result, dict):
-            files = result.get("files", [])
-        else:
-            logs.append("⚠️ generate_code returned invalid format, using fallback")
-            files = []
+        if not isinstance(result, dict):
+            raise ValueError("generate_code returned invalid format")
 
-        # 🔥 NORMALIZE
+        files = result.get("files", [])
+
         if isinstance(files, dict):
             files = [files]
 
         if not isinstance(files, list):
-            logs.append("⚠️ files not list, resetting")
-            files = []
+            raise ValueError("files must be list")
 
-        # 🔥 VALIDATE
         validated_files = []
         for f in files:
             if isinstance(f, dict) and "filename" in f and "content" in f:
                 validated_files.append(f)
 
-        # 🔥 FALLBACK (CRITICAL)
         if not validated_files:
-            logs.append("⚠️ No valid files from generate_code, using fallback")
-
-            validated_files = [
-                {
-                    "filename": "fallback.cpp",
-                    "content": "// fallback\nint main(){return 0;}"
-                }
-            ]
+            raise ValueError("No valid files from generate_code")
 
         files = validated_files
 
         code_span.end(output={"file_count": len(files)})
 
-        write_files(files)
+        # 🔥 STRICT WRITE
+        try:
+            write_files(files)
+        except Exception as e:
+            logs.append(f"🚨 File write failed: {str(e)}")
+            raise
+
         generate_cmake(files)
 
         logs.append("📁 Files written")
@@ -116,9 +109,7 @@ def run_workflow(requirement):
                 logs.append("\n❌ FAILURE DETAILS")
                 logs.append(parsed.get("summary"))
 
-            # =========================
             # ✅ SUCCESS
-            # =========================
             if confidence.get("status") == "success":
                 logs.append("✅ All tests passed")
 
@@ -130,80 +121,52 @@ def run_workflow(requirement):
             logs.append("🔧 Debugging...")
 
             # =========================
-            # 🔧 DEBUG FIX (FINAL VERSION)
+            # 🔧 DEBUG FIX
             # =========================
-            fix_result = fix_code(
-                parsed.get("summary", output),
-                files,
-                trace=trace
-            )
-            
-            logs.append(f"🐞 Debug raw output: {fix_result}")
-            
-            # SAFE extraction
-            updated_files = []
-            
-            if isinstance(fix_result, dict):
-                updated_files = fix_result.get("files", [])
-            elif isinstance(fix_result, list):
-                updated_files = fix_result
-            else:
-                logs.append("⚠️ Debug agent returned invalid type")
-            
-            logs.append(f"📂 Debug files extracted: {updated_files}")
-            
-            # =========================
-            # 🔥 AUTO-REPAIR + NORMALIZE
-            # =========================
+            try:
+                fix_result = fix_code(
+                    parsed.get("summary", output),
+                    files,
+                    trace=trace
+                )
+            except Exception as e:
+                logs.append(f"🚨 Debug agent failed: {str(e)}")
+                continue
+
+            updated_files = fix_result.get("files", [])
+
+            if not updated_files:
+                logs.append("⚠️ Debug agent returned empty files, skipping")
+                continue
+
+            # 🔥 STRICT VALIDATION AGAIN
             normalized_files = []
-            
-            for idx, f in enumerate(updated_files):
-            
-                # Case 1: dict
+
+            for f in updated_files:
                 if isinstance(f, dict):
-            
                     filename = f.get("filename")
                     content = f.get("content")
-            
-                    # 🔥 AUTO-FIX filename
-                    if not filename or not isinstance(filename, str) or not filename.strip():
-                        logs.append(f"⚠️ Fixing missing filename for item {idx}")
-                        filename = f"recovered_{idx}.cpp"
-            
-                    # 🔥 VALIDATE content
-                    if not isinstance(content, str) or not content.strip():
-                        logs.append(f"⚠️ Skipping empty content for {filename}")
-                        continue
-            
-                    normalized_files.append({
-                        "filename": filename.strip(),
-                        "content": content
-                    })
-            
-                # Case 2: raw string (LLM mistake)
-                elif isinstance(f, str):
-                    logs.append(f"⚠️ Converting raw string to file: recovered_{idx}.cpp")
-            
-                    normalized_files.append({
-                        "filename": f"recovered_{idx}.cpp",
-                        "content": f
-                    })
-            
-                else:
-                    logs.append(f"⚠️ Unknown file format skipped: {f}")
-            
-            # =========================
-            # 🔥 FINAL FALLBACK
-            # =========================
+
+                    if isinstance(filename, str) and filename.strip() and isinstance(content, str):
+                        normalized_files.append({
+                            "filename": filename.strip(),
+                            "content": content
+                        })
+
             if not normalized_files:
-                logs.append("⚠️ Debug agent failed, keeping previous files")
-                normalized_files = files
-            
+                logs.append("⚠️ No valid debug files, keeping previous")
+                continue
+
+            # 🔥 SAFE WRITE (CRITICAL FIX)
+            try:
+                write_files(normalized_files)
+            except Exception as e:
+                logs.append(f"🚨 Fix write failed: {str(e)}")
+                logs.append("⚠️ Reverting to previous files")
+                continue
+
             files = normalized_files
-            
-            # WRITE UPDATED FILES
-            write_files(files)
-            
+
             logs.append("✅ Fix applied")
 
         trace.end(level="ERROR", status_message="Max retries exceeded")
