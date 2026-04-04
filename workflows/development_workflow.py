@@ -103,7 +103,7 @@ def run_workflow(requirement):
             logs.append(f"📈 Confidence Score: {confidence_score}")
 
             # 🔥 FAILURE DETAILS
-            if parsed.get("failed", 0) > 0:
+            if isinstance(parsed, dict) and parsed.get("failed", 0) > 0:
                 logs.append("\n❌ FAILURE DETAILS")
                 logs.append(parsed.get("summary", "No detailed summary available"))
 
@@ -124,7 +124,7 @@ def run_workflow(requirement):
             # =========================
             # 🔍 FAILURE REASON
             # =========================
-            if parsed["failed"] > 0:
+            if isinstance(parsed, dict) and parsed.get("failed", 0) > 0:
                 reason = "Test Failure"
             else:
                 reason = "Build Error"
@@ -165,8 +165,17 @@ def run_workflow(requirement):
 
                 # 🔧 LOG DEBUG ACTION
                 logs.append("\n🔧 DEBUG ACTION")
-                logs.append(f"Root Cause: {debug_summary.get('root_cause')}")
-                logs.append(f"Fix Applied: {debug_summary.get('fix')}")
+                
+                if isinstance(debug_summary, dict):
+                    root_cause = debug_summary.get("root_cause", "Not provided")
+                    fix_msg = debug_summary.get("fix", "Not provided")
+                else:
+                    root_cause = "Invalid debug summary format"
+                    fix_msg = "Invalid debug summary format"
+                    logs.append("⚠️ Debug summary malformed")
+                
+                logs.append(f"Root Cause: {root_cause}")
+                logs.append(f"Fix Applied: {fix_msg}")
 
                 # 🔥 VALIDATE FILE STRUCTURE
                 validated_files = []
