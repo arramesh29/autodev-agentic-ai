@@ -1,27 +1,46 @@
 import os
 import shutil
-import os
+
 
 def write_files(files):
 
-    # 🔥 CLEAR OLD FILES
     output_dir = "generated"
-    
-    for f in os.listdir(output_dir):
-        os.remove(os.path.join(output_dir, f))
-    
-    os.makedirs("generated", exist_ok=True)
 
-    # 🔥 STRICT INPUT VALIDATION
+    # =========================
+    # 🔥 SAFE CLEANUP (FIXED)
+    # =========================
+    if os.path.exists(output_dir):
+        for item in os.listdir(output_dir):
+            path = os.path.join(output_dir, item)
+
+            try:
+                if os.path.isfile(path) or os.path.islink(path):
+                    os.remove(path)
+                elif os.path.isdir(path):
+                    shutil.rmtree(path)  # 🔥 handles /bin
+            except Exception as e:
+                print(f"⚠️ Cleanup skipped for {path}: {e}")
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # =========================
+    # 🔥 INPUT VALIDATION
+    # =========================
     if isinstance(files, dict):
         files = [files]
 
     if not isinstance(files, list):
-        raise ValueError(f"Invalid files input type: {type(files)}")
+        return {
+            "success": False,
+            "error": f"Invalid files input type: {type(files)}"
+        }
 
     valid_count = 0
     errors = []
 
+    # =========================
+    # 🔥 WRITE LOOP (FIXED)
+    # =========================
     for f in files:
 
         if not isinstance(f, dict):
@@ -39,7 +58,7 @@ def write_files(files):
             errors.append(f"Invalid content: {f}")
             continue
 
-        path = os.path.join("generated", filename.strip())
+        path = os.path.join(output_dir, filename.strip())
 
         try:
             with open(path, "w", encoding="utf-8") as file:
@@ -49,16 +68,17 @@ def write_files(files):
         except Exception as e:
             errors.append(f"{filename}: {str(e)}")
 
-    # 🔥 HARD FAIL (MANDATORY)
-        if valid_count == 0:
-            return {
-                "success": False,
-                "error": f"No valid files written. Errors: {errors}"
-            }
-        
+    # =========================
+    # 🔥 FINAL RESULT (FIXED)
+    # =========================
+    if valid_count == 0:
         return {
-            "success": True,
-            "count": valid_count
+            "success": False,
+            "error": f"No valid files written. Errors: {errors}"
         }
 
-    return valid_count
+    return {
+        "success": True,
+        "count": valid_count,
+        "errors": errors if errors else None
+    }
