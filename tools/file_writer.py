@@ -1,27 +1,28 @@
 import os
-import shutil
 
 
 def write_files(files):
 
     output_dir = "generated"
 
-    # =========================
-    # 🔥 SAFE CLEANUP (FIXED)
-    # =========================
-    if os.path.exists(output_dir):
-        for item in os.listdir(output_dir):
-            path = os.path.join(output_dir, item)
-
-            try:
-                if os.path.isfile(path) or os.path.islink(path):
-                    os.remove(path)
-                elif os.path.isdir(path):
-                    shutil.rmtree(path)  # 🔥 handles /bin
-            except Exception as e:
-                print(f"⚠️ Cleanup skipped for {path}: {e}")
-
     os.makedirs(output_dir, exist_ok=True)
+
+    # =========================
+    # 🔥 SAFE CLEANUP (SOURCE ONLY)
+    # =========================
+    for item in os.listdir(output_dir):
+        path = os.path.join(output_dir, item)
+
+        # 🚫 DO NOT DELETE build/system files
+        if item.lower() == "cmakelists.txt":
+            continue
+
+        # delete only source/test files
+        if item.endswith((".cpp", ".h", ".txt")):
+            try:
+                os.remove(path)
+            except Exception as e:
+                print(f"⚠️ Could not remove {path}: {e}")
 
     # =========================
     # 🔥 INPUT VALIDATION
@@ -39,7 +40,7 @@ def write_files(files):
     errors = []
 
     # =========================
-    # 🔥 WRITE LOOP (FIXED)
+    # 🔥 WRITE LOOP
     # =========================
     for f in files:
 
@@ -69,7 +70,7 @@ def write_files(files):
             errors.append(f"{filename}: {str(e)}")
 
     # =========================
-    # 🔥 FINAL RESULT (FIXED)
+    # 🔥 FINAL RESULT
     # =========================
     if valid_count == 0:
         return {
