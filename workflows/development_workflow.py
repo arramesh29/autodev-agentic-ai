@@ -16,6 +16,26 @@ from tools.confidence_scorer import compute_confidence
 langfuse = Langfuse()
 
 
+# 🔥 FINAL FIX: recursive extractor
+def extract_files_recursively(obj):
+    extracted = []
+
+    if isinstance(obj, dict):
+        # valid file
+        if "filename" in obj and "content" in obj:
+            extracted.append(obj)
+
+        # nested structure
+        elif "files" in obj:
+            extracted.extend(extract_files_recursively(obj["files"]))
+
+    elif isinstance(obj, list):
+        for item in obj:
+            extracted.extend(extract_files_recursively(item))
+
+    return extracted
+
+
 def run_workflow(requirement):
 
     trace = langfuse.trace(
@@ -53,16 +73,10 @@ def run_workflow(requirement):
 
         files = result.get("files", [])
 
-        if isinstance(files, dict):
-            files = [files]
-
         if not isinstance(files, list):
             raise ValueError("files must be list")
 
-        validated_files = []
-        for f in files:
-            if isinstance(f, dict) and "filename" in f and "content" in f:
-                validated_files.append(f)
+        validated_files = extract_files_recursively(files)
 
         if not validated_files:
             raise ValueError("No valid files from generate_code")
@@ -72,11 +86,7 @@ def run_workflow(requirement):
         code_span.end(output={"file_count": len(files)})
 
         # 🔥 STRICT WRITE
-        try:
-            write_files(files)
-        except Exception as e:
-            logs.append(f"🚨 File write failed: {str(e)}")
-            raise
+        write_files(files)
 
         generate_cmake(files)
 
@@ -133,71 +143,31 @@ def run_workflow(requirement):
                 logs.append(f"🚨 Debug agent failed: {str(e)}")
                 continue
 
-            # =========================
-            # 🔥 ROBUST EXTRACTION (FINAL FIX)
-            # =========================
+            # 🔥 FINAL EXTRACTION (BULLETPROOF)
+            updated_files = extract_files_recursively(fix_result)
 
-            updated_files = []
-
-            if isinstance(fix_result, dict):
-
-                if "files" in fix_result:
-                    updated_files = fix_result["files"]
-
-                elif isinstance(fix_result.get("files"), list):
-                    updated_files = fix_result.get("files", [])
-
-                else:
-                    logs.append(f"🚨 Invalid fix_result structure: {fix_result}")
-                    continue
-
-            else:
-                logs.append(f"🚨 Unexpected fix_result type: {type(fix_result)}")
+            if not updated_files:
+                logs.append("⚠️ No valid debug files extracted, skipping")
                 continue
 
-            # 🔥 FLATTEN NESTED BUG
-            flattened_files = []
-
-            for f in updated_files:
-
-                if isinstance(f, dict) and "files" in f:
-                    inner_files = f.get("files", [])
-                    if isinstance(inner_files, list):
-                        flattened_files.extend(inner_files)
-                    continue
-
-                flattened_files.append(f)
-
-            # =========================
             # 🔥 STRICT NORMALIZATION
-            # =========================
-
             normalized_files = []
 
-            for f in flattened_files:
-
+            for f in updated_files:
                 if not isinstance(f, dict):
-                    logs.append(f"⚠️ Skipping non-dict file: {f}")
                     continue
 
                 filename = f.get("filename")
                 content = f.get("content")
 
-                if not isinstance(filename, str) or not filename.strip():
-                    logs.append(f"⚠️ Invalid filename skipped: {f}")
-                    continue
-
-                if not isinstance(content, str):
-                    logs.append(f"⚠️ Invalid content skipped: {f}")
-                    continue
-
-                normalized_files.append({
-                    "filename": filename.strip(),
-                    "content": content
-                })
+                if isinstance(filename, str) and filename.strip() and isinstance(content, str):
+                    normalized_files.append({
+                        "filename": filename.strip(),
+                        "content": content
+                    })
 
             if not normalized_files:
-                logs.append("⚠️ No valid debug files after flattening, keeping previous")
+                logs.append("⚠️ No valid debug files after normalization, skipping")
                 continue
 
             # 🔥 SAFE WRITE
@@ -205,7 +175,6 @@ def run_workflow(requirement):
                 write_files(normalized_files)
             except Exception as e:
                 logs.append(f"🚨 Fix write failed: {str(e)}")
-                logs.append("⚠️ Reverting to previous files")
                 continue
 
             files = normalized_files
