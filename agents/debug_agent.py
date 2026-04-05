@@ -31,6 +31,7 @@ CRITICAL:
 - You MUST change code if needed
 - Handle edge cases (NaN, infinity)
 - Return ALL files
+- Do NOT return unchanged code
 
 Return ONLY JSON:
 {{
@@ -55,10 +56,19 @@ Return ONLY JSON:
             )
 
         # =========================
-        # 🔥 SAFE LLM CALL
+        # 🔥 LLM CALL WITH RETRY
         # =========================
-        response = llm.invoke(prompt)
-        text = (response.content or "").strip()
+        MAX_RETRY = 5
+        for _ in range(MAX_RETRY):
+            response = llm.invoke(prompt)
+
+            if not response or not hasattr(response, "content"):
+                continue
+
+            text = (response.content or "").strip()
+
+            if text and len(text) > 30:
+                break
 
         if not text:
             raise ValueError("Empty LLM response")
@@ -67,32 +77,31 @@ Return ONLY JSON:
             generation.end(output=text[:2000])
 
         # =========================
-        # 🔥 ROBUST JSON EXTRACTION
+        # 🔥 ROBUST CLEANING
         # =========================
+        text = text.replace("```json", "").replace("```", "").strip()
 
-        # Remove markdown wrappers safely
-        if "```" in text:
-            parts = text.split("```")
-            for p in parts:
-                if "{" in p and "}" in p:
-                    text = p
-                    break
+        # handle "json\n{...}"
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
 
-        # Extract JSON block (non-greedy)
-        match = re.search(r"\{[\s\S]*?\}", text)
-        if not match:
-            raise ValueError("No JSON found in response")
+        # extract JSON safely using boundaries
+        start = text.find("{")
+        end = text.rfind("}")
 
-        json_str = match.group(0)
+        if start == -1 or end == -1:
+            raise ValueError("No JSON boundaries found")
 
-        # Cleanup trailing commas
+        json_str = text[start:end + 1]
+
+        # cleanup trailing commas
         json_str = re.sub(r",\s*}", "}", json_str)
         json_str = re.sub(r",\s*]", "]", json_str)
 
         parsed = json.loads(json_str)
 
         # =========================
-        # VALIDATION
+        # VALIDATION (UNCHANGED)
         # =========================
         updated_files = parsed.get("files", [])
 
@@ -115,11 +124,15 @@ Return ONLY JSON:
                         "content": content
                     })
 
+        # =========================
+        # 🔥 FALLBACK (NEW)
+        # =========================
         if not validated_files:
-            raise ValueError("No valid files returned")
+            print("⚠️ Debug agent returned no valid files → fallback to previous files")
+            validated_files = files
 
         # =========================
-        # 🔥 ENSURE COMPLETENESS
+        # COMPLETENESS (UNCHANGED)
         # =========================
         returned_filenames = {f["filename"] for f in validated_files}
         missing = original_filenames - returned_filenames
@@ -130,7 +143,7 @@ Return ONLY JSON:
                     validated_files.append(f)
 
         # =========================
-        # 🔥 RELAXED CHANGE CHECK
+        # 🔥 CHANGE DETECTION (IMPROVED)
         # =========================
         old_map = {f["filename"]: f["content"] for f in files}
         new_map = {f["filename"]: f["content"] for f in validated_files}
@@ -140,7 +153,7 @@ Return ONLY JSON:
         )
 
         if changes == 0:
-            print("⚠️ Warning: Debug agent made no visible changes")
+            print("⚠️ Debug agent made no visible changes")
 
         debug_summary = parsed.get("debug_summary", {
             "root_cause": "Not provided",
@@ -164,6 +177,8 @@ Return ONLY JSON:
 
     except Exception as e:
 
+        print(f"⚠️ Debug agent error: {e}")
+
         if generation:
             generation.end(
                 level="ERROR",
@@ -176,4 +191,11 @@ Return ONLY JSON:
         if span:
             span.end(level="ERROR", status_message=str(e))
 
-        raise ValueError(f"Debug agent failed:\n{text if text else 'No response'}")
+        # 🔥 CRITICAL: NEVER BREAK WORKFLOW
+        return {
+            "files": files,
+            "debug_summary": {
+                "root_cause": "Debug agent failed",
+                "fix": "No changes applied"
+            }
+        }
