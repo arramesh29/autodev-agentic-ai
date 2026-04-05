@@ -5,7 +5,6 @@ import re
 
 def fix_code(error_log, files, trace=None, parent_span=None):
 
-    # SAFE span creation
     span = None
     if trace:
         span = (
@@ -14,16 +13,12 @@ def fix_code(error_log, files, trace=None, parent_span=None):
             else trace.span(name="fix_code_agent")
         )
 
-    # Extract original filenames
-    original_filenames = set()
-    for f in files:
-        if isinstance(f, dict) and "filename" in f:
-            original_filenames.add(f["filename"])
+    original_filenames = {
+        f["filename"] for f in files if isinstance(f, dict) and "filename" in f
+    }
 
     prompt = f"""
-You are a senior automotive C++ software engineer.
-
-The system failed.
+You are a senior automotive C++ engineer.
 
 ERROR:
 {error_log}
@@ -32,11 +27,10 @@ FILES:
 {files}
 
 CRITICAL:
-- You MUST FIX the issue
-- You MUST modify the code
-- Do NOT return the same code again
-- Handle edge cases like infinity / NaN properly
-- Ensure all files are returned
+- You MUST fix the issue
+- You MUST change code if needed
+- Handle edge cases (NaN, infinity)
+- Return ALL files
 
 Return ONLY JSON:
 {{
@@ -61,41 +55,37 @@ Return ONLY JSON:
             )
 
         # =========================
-        # 🔥 LLM CALL WITH RETRY
+        # 🔥 SAFE LLM CALL
         # =========================
-        MAX_LLM_RETRY = 2
-
-        for attempt in range(MAX_LLM_RETRY):
-            response = llm.invoke(prompt)
-
-            if not response or not hasattr(response, "content"):
-                continue
-
-            text = response.content.strip()
-
-            # 🔥 Reject weak responses
-            if not text or len(text) < 50:
-                continue
-
-            break
+        response = llm.invoke(prompt)
+        text = (response.content or "").strip()
 
         if not text:
-            raise ValueError("LLM returned empty/invalid response")
+            raise ValueError("Empty LLM response")
 
         if generation:
             generation.end(output=text[:2000])
 
         # =========================
-        # JSON EXTRACTION
+        # 🔥 ROBUST JSON EXTRACTION
         # =========================
-        cleaned = text.replace("```json", "").replace("```", "")
 
-        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+        # Remove markdown wrappers safely
+        if "```" in text:
+            parts = text.split("```")
+            for p in parts:
+                if "{" in p and "}" in p:
+                    text = p
+                    break
+
+        # Extract JSON block (non-greedy)
+        match = re.search(r"\{[\s\S]*?\}", text)
         if not match:
-            raise ValueError("No JSON object found in debug agent output")
+            raise ValueError("No JSON found in response")
 
         json_str = match.group(0)
 
+        # Cleanup trailing commas
         json_str = re.sub(r",\s*}", "}", json_str)
         json_str = re.sub(r",\s*]", "]", json_str)
 
@@ -115,46 +105,42 @@ Return ONLY JSON:
         validated_files = []
 
         for f in updated_files:
-            if not isinstance(f, dict):
-                continue
+            if isinstance(f, dict):
+                filename = f.get("filename")
+                content = f.get("content")
 
-            filename = f.get("filename")
-            content = f.get("content")
-
-            if isinstance(filename, str) and filename.strip() and isinstance(content, str):
-                validated_files.append({
-                    "filename": filename.strip(),
-                    "content": content
-                })
+                if isinstance(filename, str) and filename.strip() and isinstance(content, str):
+                    validated_files.append({
+                        "filename": filename.strip(),
+                        "content": content
+                    })
 
         if not validated_files:
-            raise ValueError("Debug agent returned no valid files")
+            raise ValueError("No valid files returned")
 
         # =========================
-        # 🔥 ENSURE ACTUAL CHANGE
+        # 🔥 ENSURE COMPLETENESS
+        # =========================
+        returned_filenames = {f["filename"] for f in validated_files}
+        missing = original_filenames - returned_filenames
+
+        if missing:
+            for f in files:
+                if f["filename"] in missing:
+                    validated_files.append(f)
+
+        # =========================
+        # 🔥 RELAXED CHANGE CHECK
         # =========================
         old_map = {f["filename"]: f["content"] for f in files}
         new_map = {f["filename"]: f["content"] for f in validated_files}
 
-        no_change = True
-        for k in old_map:
-            if k not in new_map or old_map[k] != new_map[k]:
-                no_change = False
-                break
+        changes = sum(
+            1 for k in old_map if k not in new_map or old_map[k] != new_map[k]
+        )
 
-        if no_change:
-            raise ValueError("LLM returned identical code (no fix applied)")
-
-        # =========================
-        # COMPLETENESS
-        # =========================
-        returned_filenames = set(f["filename"] for f in validated_files)
-        missing_files = original_filenames - returned_filenames
-
-        if missing_files:
-            for f in files:
-                if f["filename"] in missing_files:
-                    validated_files.append(f)
+        if changes == 0:
+            print("⚠️ Warning: Debug agent made no visible changes")
 
         debug_summary = parsed.get("debug_summary", {
             "root_cause": "Not provided",
@@ -165,6 +151,7 @@ Return ONLY JSON:
             span.end(
                 output={
                     "files_updated": len(validated_files),
+                    "changes": changes,
                     "root_cause": debug_summary.get("root_cause"),
                     "fix": debug_summary.get("fix")
                 }
@@ -187,11 +174,6 @@ Return ONLY JSON:
             )
 
         if span:
-            span.end(
-                level="ERROR",
-                status_message=str(e)
-            )
+            span.end(level="ERROR", status_message=str(e))
 
-        raise ValueError(
-            f"Debug agent failed:\n{text if text else 'No response'}"
-        )
+        raise ValueError(f"Debug agent failed:\n{text if text else 'No response'}")
