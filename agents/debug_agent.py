@@ -3,7 +3,34 @@ import json
 import re
 
 
+def _normalize_files(files):
+    """Ensure safe structure for files"""
+    normalized = []
+
+    if isinstance(files, dict):
+        files = [files]
+
+    if not isinstance(files, list):
+        return []
+
+    for f in files:
+        if isinstance(f, dict):
+            filename = f.get("filename")
+            content = f.get("content")
+
+            if isinstance(filename, str) and isinstance(content, str):
+                normalized.append({
+                    "filename": filename.strip(),
+                    "content": content
+                })
+
+    return normalized
+
+
 def fix_code(error_log, files, trace=None, parent_span=None):
+
+    # 🔥 Normalize incoming files (CRITICAL)
+    files = _normalize_files(files)
 
     span = None
     if trace:
@@ -13,10 +40,11 @@ def fix_code(error_log, files, trace=None, parent_span=None):
             else trace.span(name="fix_code_agent")
         )
 
-    original_filenames = {
-        f["filename"] for f in files if isinstance(f, dict) and "filename" in f
-    }
+    original_filenames = {f["filename"] for f in files}
 
+    # =========================
+    # 🔥 STRICT PROMPT
+    # =========================
     prompt = f"""
 You are a senior automotive C++ engineer.
 
@@ -26,35 +54,73 @@ ERROR:
 FILES:
 {files}
 
-CRITICAL:
-- You MUST fix the issue
-- You MUST change code if needed
-- Handle edge cases (NaN, infinity)
-- Return ALL files
-- Do NOT return unchanged code
+=========================
+CRITICAL INSTRUCTIONS
+=========================
 
-Return ONLY JSON:
+- Fix the issue in the code
+- Modify logic if required
+- Handle edge cases (NaN, infinity)
+- If the failure is with test case, modify test case
+- Return ALL the 3 files specified in format always
+
+=========================
+STRICT OUTPUT FORMAT
+=========================
+
+Return ONLY valid JSON.
+
+Schema:
+
 {{
-  "files":[{{"filename":"...","content":"..."}}],
+  "files": [
+    {{
+      "filename": "string",
+      "content": "string"
+    }}
+  ],
   "debug_summary": {{
-      "root_cause": "...",
-      "fix": "..."
+    "root_cause": "string",
+    "fix": "string"
   }}
 }}
+
+=========================
+STRICT RULES
+=========================
+
+- "files" MUST be a list
+- Each item MUST be an object
+- NO strings inside "files"
+
+❌ INVALID:
+"files": ["code"]
+
+❌ INVALID:
+"files": "string"
+
+❌ INVALID:
+missing filename/content
+
+✅ VALID:
+Files Format:
+
+{{
+  "files":[
+    {{"filename":"aeb_controller.h","content":"header code"}},
+    {{"filename":"aeb_controller.cpp","content":"implementation"}},
+    {{"filename":"test_aeb_controller.cpp","content":"GoogleTest code"}}
+  ]
+}}
+
+If format is wrong, system will reject your response.
+
+Return ONLY JSON.
 """
 
-    generation = None
     text = None
 
     try:
-        if span:
-            generation = span.generation(
-                name="llm_fix_code",
-                model="gpt-4o",
-                input=prompt,
-                metadata={"agent": "debug_agent"}
-            )
-
         # =========================
         # 🔥 LLM CALL WITH RETRY
         # =========================
@@ -73,87 +139,49 @@ Return ONLY JSON:
         if not text:
             raise ValueError("Empty LLM response")
 
-        if generation:
-            generation.end(output=text[:2000])
-
         # =========================
-        # 🔥 ROBUST CLEANING
+        # 🔥 CLEAN RESPONSE
         # =========================
         text = text.replace("```json", "").replace("```", "").strip()
 
-        # handle "json\n{...}"
         if text.lower().startswith("json"):
             text = text[4:].strip()
 
-        # extract JSON safely using boundaries
         start = text.find("{")
         end = text.rfind("}")
 
         if start == -1 or end == -1:
-            raise ValueError("No JSON boundaries found")
+            raise ValueError("No JSON found")
 
         json_str = text[start:end + 1]
 
-        # cleanup trailing commas
         json_str = re.sub(r",\s*}", "}", json_str)
         json_str = re.sub(r",\s*]", "]", json_str)
 
         parsed = json.loads(json_str)
 
-        # =========================
-        # VALIDATION (UNCHANGED)
-        # =========================
         updated_files = parsed.get("files", [])
 
-        if isinstance(updated_files, dict):
-            updated_files = [updated_files]
-
-        if not isinstance(updated_files, list):
-            raise ValueError("files must be a list")
-
-        validated_files = []
-
-        for f in updated_files:
-            if isinstance(f, dict):
-                filename = f.get("filename")
-                content = f.get("content")
-
-                if isinstance(filename, str) and filename.strip() and isinstance(content, str):
-                    validated_files.append({
-                        "filename": filename.strip(),
-                        "content": content
-                    })
+        # =========================
+        # 🔥 SANITIZE OUTPUT (CRITICAL FIX)
+        # =========================
+        updated_files = _normalize_files(updated_files)
 
         # =========================
-        # 🔥 FALLBACK (NEW)
+        # 🔥 FALLBACK IF EMPTY
         # =========================
-        if not validated_files:
-            print("⚠️ Debug agent returned no valid files → fallback to previous files")
-            validated_files = files
+        if not updated_files:
+            print("⚠️ No valid files from LLM → fallback to previous files")
+            updated_files = files
 
         # =========================
-        # COMPLETENESS (UNCHANGED)
+        # 🔥 ENSURE COMPLETENESS
         # =========================
-        returned_filenames = {f["filename"] for f in validated_files}
-        missing = original_filenames - returned_filenames
+        returned = {f["filename"] for f in updated_files}
 
-        if missing:
-            for f in files:
-                if f["filename"] in missing:
-                    validated_files.append(f)
-
-        # =========================
-        # 🔥 CHANGE DETECTION (IMPROVED)
-        # =========================
-        old_map = {f["filename"]: f["content"] for f in files}
-        new_map = {f["filename"]: f["content"] for f in validated_files}
-
-        changes = sum(
-            1 for k in old_map if k not in new_map or old_map[k] != new_map[k]
-        )
-
-        if changes == 0:
-            print("⚠️ Debug agent made no visible changes")
+        for f in files:
+            if f["filename"] not in returned:
+                updated_files.append(f)
 
         debug_summary = parsed.get("debug_summary", {
             "root_cause": "Not provided",
@@ -163,15 +191,14 @@ Return ONLY JSON:
         if span:
             span.end(
                 output={
-                    "files_updated": len(validated_files),
-                    "changes": changes,
+                    "files_updated": len(updated_files),
                     "root_cause": debug_summary.get("root_cause"),
                     "fix": debug_summary.get("fix")
                 }
             )
 
         return {
-            "files": validated_files,
+            "files": updated_files,
             "debug_summary": debug_summary
         }
 
@@ -179,23 +206,14 @@ Return ONLY JSON:
 
         print(f"⚠️ Debug agent error: {e}")
 
-        if generation:
-            generation.end(
-                level="ERROR",
-                status_message=str(e),
-                metadata={
-                    "raw_response": text[:2000] if text else "no response"
-                }
-            )
-
         if span:
             span.end(level="ERROR", status_message=str(e))
 
-        # 🔥 CRITICAL: NEVER BREAK WORKFLOW
+        # 🔥 NEVER BREAK WORKFLOW
         return {
             "files": files,
             "debug_summary": {
-                "root_cause": "Debug agent failed",
+                "root_cause": "Debug failed",
                 "fix": "No changes applied"
             }
         }
