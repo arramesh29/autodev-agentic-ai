@@ -16,7 +16,6 @@ from tools.confidence_scorer import compute_confidence
 langfuse = Langfuse()
 
 
-# 🔥 Recursive extractor
 def extract_files_recursively(obj):
     extracted = []
 
@@ -33,7 +32,6 @@ def extract_files_recursively(obj):
     return extracted
 
 
-# 🔥 Clean generated folder (CRITICAL FIX)
 def clean_generated_folder():
     output_dir = "generated"
     if not os.path.exists(output_dir):
@@ -62,17 +60,13 @@ def run_workflow(requirement):
         # =========================
         plan_span = trace.span(name="planning")
 
-        plan = create_plan(
-            requirement,
-            trace=trace,
-            parent_span=plan_span
-        )
+        plan = create_plan(requirement, trace=trace, parent_span=plan_span)
 
         plan_span.end(output=plan)
         logs.append("📋 Plan created")
 
         # =========================
-        # ⚙️ CODE GEN (WITH FIX)
+        # ⚙️ CODE GEN
         # =========================
         code_span = trace.span(name="code_generation")
 
@@ -95,7 +89,6 @@ def run_workflow(requirement):
             generated_files = extract_files_recursively(result.get("files", []))
 
             returned_files = set(f["filename"] for f in generated_files)
-
             missing = required_files - returned_files
 
             if not missing:
@@ -105,15 +98,14 @@ def run_workflow(requirement):
             logs.append(f"⚠️ Generation attempt {gen_attempt} missing files: {missing}")
 
         if not files:
-            raise ValueError("❌ Code generation failed to produce all required files")
+            raise ValueError("❌ Code generation failed")
 
         code_span.end(output={"file_count": len(files)})
 
-        # 🔥 CLEAN BEFORE WRITE (CRITICAL)
+        # INITIAL WRITE
         clean_generated_folder()
-
-        # 🔥 SAFE INITIAL WRITE
         write_result = write_files(files)
+
         if not write_result.get("success"):
             logs.append(f"⚠️ Initial write failed: {write_result.get('error')}")
 
@@ -132,59 +124,44 @@ def run_workflow(requirement):
             try:
                 logs.append(f"\n=== Attempt {attempt} ===")
 
-                # -------------------------
-                # BUILD + TEST
-                # -------------------------
                 output = build_and_test()
 
-                parsed = parse_ctest_output(output)
-                if not isinstance(parsed, dict):
-                    parsed = {"failed": 1, "summary": "Invalid parser"}
-
-                confidence = compute_confidence(parsed)
-                if not isinstance(confidence, dict):
-                    confidence = {"confidence_score": 0, "status": "retry"}
+                parsed = parse_ctest_output(output) or {"failed": 1}
+                confidence = compute_confidence(parsed) or {"status": "retry"}
 
                 logs.append(f"📊 Test Summary: {parsed}")
                 logs.append(f"📈 Confidence Score: {confidence.get('confidence_score')}")
 
                 if parsed.get("failed", 0) > 0:
-                    logs.append("\n❌ FAILURE DETAILS")
                     logs.append(parsed.get("summary"))
 
-                # -------------------------
-                # SUCCESS
-                # -------------------------
+                # ✅ SUCCESS
                 if confidence.get("status") == "success":
                     logs.append("✅ All tests passed")
-
                     trace.end(output="success")
                     langfuse.flush()
-
                     return {"status": "success", "logs": logs}
 
                 logs.append("🔧 Debugging...")
 
-                # -------------------------
-                # DEBUG
-                # -------------------------
+                # =========================
+                # 🔥 DEBUG FIX (CRITICAL FIX)
+                # =========================
                 fix_result = fix_code(
                     parsed.get("summary", output),
                     files,
                     trace=trace
                 )
 
-                updated_files = extract_files_recursively(fix_result)
+                # 🔥 FIX: DIRECT ACCESS (NOT recursive)
+                updated_files = fix_result.get("files", [])
 
-                if not updated_files:
-                    logs.append("⚠️ No valid debug files extracted")
+                if not isinstance(updated_files, list) or not updated_files:
+                    logs.append("⚠️ Debug returned no files")
                     continue
 
-                # -------------------------
-                # NORMALIZE
-                # -------------------------
+                # 🔥 NORMALIZE
                 normalized_files = []
-
                 for f in updated_files:
                     if isinstance(f, dict):
                         filename = f.get("filename")
@@ -200,9 +177,7 @@ def run_workflow(requirement):
                     logs.append("⚠️ No valid normalized files")
                     continue
 
-                # 🔥 CLEAN + WRITE (CRITICAL)
-                clean_generated_folder()
-
+                # 🔥 CRITICAL: WRITE UPDATED FILES
                 write_result = write_files(normalized_files)
 
                 if not write_result.get("success"):
@@ -210,15 +185,13 @@ def run_workflow(requirement):
                     continue
 
                 files = normalized_files
-                logs.append("✅ Fix applied")
+
+                logs.append(f"✅ Fix applied ({write_result.get('count')} files)")
 
             except Exception as loop_error:
                 logs.append(f"🚨 Attempt {attempt} crashed: {loop_error}")
                 continue
 
-        # =========================
-        # ❌ MAX RETRIES
-        # =========================
         trace.end(level="ERROR", status_message="Max retries exceeded")
         langfuse.flush()
 
