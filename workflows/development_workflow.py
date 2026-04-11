@@ -106,6 +106,8 @@ def run_workflow(requirement):
         clean_generated_folder()
         write_result = write_files(files)
 
+        logs.append(f"DEBUG: Initial write → {write_result}")
+
         if not write_result.get("success"):
             logs.append(f"⚠️ Initial write failed: {write_result.get('error')}")
 
@@ -145,7 +147,7 @@ def run_workflow(requirement):
                 logs.append("🔧 Debugging...")
 
                 # =========================
-                # 🔥 DEBUG FIX (CRITICAL FIX)
+                # DEBUG
                 # =========================
                 fix_result = fix_code(
                     parsed.get("summary", output),
@@ -153,15 +155,19 @@ def run_workflow(requirement):
                     trace=trace
                 )
 
-                # 🔥 FIX: DIRECT ACCESS (NOT recursive)
                 updated_files = fix_result.get("files", [])
+
+                logs.append(f"DEBUG: Raw debug files count = {len(updated_files)}")
 
                 if not isinstance(updated_files, list) or not updated_files:
                     logs.append("⚠️ Debug returned no files")
                     continue
 
-                # 🔥 NORMALIZE
+                # =========================
+                # NORMALIZATION
+                # =========================
                 normalized_files = []
+
                 for f in updated_files:
                     if isinstance(f, dict):
                         filename = f.get("filename")
@@ -173,12 +179,36 @@ def run_workflow(requirement):
                                 "content": content
                             })
 
-                if not normalized_files:
-                    logs.append("⚠️ No valid normalized files")
-                    continue
+                logs.append(f"DEBUG: Normalized files count = {len(normalized_files)}")
 
-                # 🔥 CRITICAL: WRITE UPDATED FILES
+                # 🔥 FALLBACK FIX
+                if not normalized_files:
+                    logs.append("⚠️ No valid normalized files → using raw debug output")
+
+                    normalized_files = [
+                        f for f in updated_files
+                        if isinstance(f, dict) and "filename" in f and "content" in f
+                    ]
+
+                    logs.append(f"DEBUG: Fallback files count = {len(normalized_files)}")
+
+                    if not normalized_files:
+                        logs.append("🚨 Debug output unusable → skipping")
+                        continue
+
+                # =========================
+                # WRITE FILES
+                # =========================
+                logs.append(f"DEBUG: Writing {len(normalized_files)} files")
+
+                try:
+                    logs.append(f"DEBUG: First file snippet → {normalized_files[0]['content'][:100]}")
+                except Exception:
+                    pass
+
                 write_result = write_files(normalized_files)
+
+                logs.append(f"DEBUG: Write result → {write_result}")
 
                 if not write_result.get("success"):
                     logs.append(f"⚠️ Write failed: {write_result.get('error')}")
