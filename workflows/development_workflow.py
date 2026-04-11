@@ -155,12 +155,23 @@ def run_workflow(requirement):
                     trace=trace
                 )
 
-                updated_files = fix_result.get("files", [])
+                # 🔥 CRITICAL VALIDATION
+                if not isinstance(fix_result, dict):
+                    logs.append(f"🚨 Debug agent returned invalid result: {type(fix_result)}")
+                    continue
+
+                logs.append(f"DEBUG: fix_result keys = {list(fix_result.keys())}")
+
+                updated_files = fix_result.get("files")
+
+                if not isinstance(updated_files, list):
+                    logs.append(f"🚨 Debug files invalid type: {type(updated_files)}")
+                    continue
 
                 logs.append(f"DEBUG: Raw debug files count = {len(updated_files)}")
 
-                if not isinstance(updated_files, list) or not updated_files:
-                    logs.append("⚠️ Debug returned no files")
+                if not updated_files:
+                    logs.append("⚠️ Debug returned empty files list")
                     continue
 
                 # =========================
@@ -181,20 +192,9 @@ def run_workflow(requirement):
 
                 logs.append(f"DEBUG: Normalized files count = {len(normalized_files)}")
 
-                # 🔥 FALLBACK FIX
                 if not normalized_files:
-                    logs.append("⚠️ No valid normalized files → using raw debug output")
-
-                    normalized_files = [
-                        f for f in updated_files
-                        if isinstance(f, dict) and "filename" in f and "content" in f
-                    ]
-
-                    logs.append(f"DEBUG: Fallback files count = {len(normalized_files)}")
-
-                    if not normalized_files:
-                        logs.append("🚨 Debug output unusable → skipping")
-                        continue
+                    logs.append("⚠️ No valid normalized files → skipping")
+                    continue
 
                 # =========================
                 # WRITE FILES
