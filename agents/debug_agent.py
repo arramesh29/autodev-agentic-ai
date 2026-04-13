@@ -58,15 +58,29 @@ def _extract_json(text):
     if text.lower().startswith("json"):
         text = text[4:].strip()
 
-    # 🔥 safer extraction
-    matches = re.findall(r"\{[\s\S]*?\}", text)
+    # 🔥 CORRECT: bracket-balanced JSON extraction
+    start = text.find("{")
+    if start == -1:
+        print("SENDING: {'step': 'json_no_open_brace'}")
+        return None
 
-    for candidate in matches:
-        try:
-            parsed = json.loads(candidate)
-            return parsed
-        except Exception:
-            continue
+    stack = 0
+
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            stack += 1
+        elif text[i] == "}":
+            stack -= 1
+
+            if stack == 0:
+                candidate = text[start:i + 1]
+
+                try:
+                    parsed = json.loads(candidate)
+                    return parsed
+                except Exception as e:
+                    print(f"SENDING: {{'step': 'json_candidate_failed', 'error': '{str(e)}'}}")
+                    continue
 
     print("SENDING: {'step': 'json_extraction_failed'}")
     return None
