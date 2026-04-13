@@ -170,8 +170,6 @@ def run_workflow(requirement):
                     send_log(logs, f"🚨 Debug agent returned invalid result: {type(fix_result)}")
                     continue
 
-                send_log(logs, f"DEBUG: fix_result keys = {list(fix_result.keys())}")
-
                 updated_files = fix_result.get("files")
 
                 if not isinstance(updated_files, list):
@@ -184,21 +182,8 @@ def run_workflow(requirement):
                     send_log(logs, "⚠️ Debug returned empty files list")
                     continue
 
-                # 🔥🔥🔥 CRITICAL FIX: IMMEDIATE WRITE
-                send_log(logs, f"🔥 DEBUG RAW WRITE START ({len(updated_files)} files)")
-
-                raw_write_result = write_files(updated_files)
-
-                send_log(logs, f"🔥 DEBUG RAW WRITE RESULT → {raw_write_result}")
-
-                if raw_write_result.get("success"):
-                    files = updated_files
-                    send_log(logs, "🔥 DEBUG RAW WRITE SUCCESS")
-                else:
-                    send_log(logs, "❌ DEBUG RAW WRITE FAILED")
-
                 # =========================
-                # NORMALIZATION (UNCHANGED)
+                # NORMALIZATION
                 # =========================
                 normalized_files = []
 
@@ -220,23 +205,19 @@ def run_workflow(requirement):
                     continue
 
                 # =========================
-                # EXISTING WRITE LOGIC (PRESERVED)
+                # 🔥 SINGLE WRITE (FINAL FIX)
                 # =========================
-                send_log(logs, f"DEBUG: Writing {len(normalized_files)} files")
-
-                try:
-                    send_log(logs, f"DEBUG: First file snippet → {normalized_files[0]['content'][:100]}")
-                except Exception:
-                    pass
+                send_log(logs, f"🔥 WRITING {len(normalized_files)} FILES")
 
                 write_result = write_files(normalized_files)
 
-                send_log(logs, f"DEBUG: Write result → {write_result}")
+                send_log(logs, f"🔥 WRITE RESULT → {write_result}")
 
                 if not write_result.get("success"):
                     send_log(logs, f"⚠️ Write failed: {write_result.get('error')}")
                     continue
 
+                # ✅ UPDATE STATE ONLY AFTER SUCCESS
                 files = normalized_files
 
                 send_log(logs, f"✅ Fix applied ({write_result.get('count')} files)")
