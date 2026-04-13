@@ -59,7 +59,7 @@ def _extract_json(text):
         return None
 
 
-# 🔥 NEW: SYNTAX FIX DETECTOR
+# 🔥 SYNTAX DETECTOR (UNCHANGED)
 def _is_syntax_error(error_log):
     if not isinstance(error_log, str):
         return False
@@ -75,21 +75,19 @@ def _is_syntax_error(error_log):
     ])
 
 
-# 🔥 NEW: HARD FIX FOR TEST FILE
+# 🔥 SYNTAX FIX (UNCHANGED)
 def _force_syntax_fix(files):
     fixed_files = []
 
     for f in files:
         content = f["content"]
 
-        # simple brace balance fix
         open_braces = content.count("{")
         close_braces = content.count("}")
 
         if open_braces > close_braces:
             content += "\n}" * (open_braces - close_braces)
 
-        # ensure file ends cleanly
         content = content.rstrip() + "\n"
 
         fixed_files.append({
@@ -108,15 +106,9 @@ def fix_code(error_log, files, trace=None, parent_span=None):
 
     files = _normalize_files(files)
 
-    span = None
-    if trace:
-        span = (
-            parent_span.span(name="fix_code_agent")
-            if parent_span
-            else trace.span(name="fix_code_agent")
-        )
-
-    # 🔥 STEP 1: HANDLE SYNTAX ERRORS FIRST (DETERMINISTIC)
+    # =========================
+    # 🔥 STEP 1: SYNTAX FIX
+    # =========================
     if _is_syntax_error(error_log):
         print("SENDING: {'step': 'syntax_error_detected'}")
 
@@ -125,12 +117,14 @@ def fix_code(error_log, files, trace=None, parent_span=None):
         return {
             "files": fixed,
             "debug_summary": {
-                "root_cause": "Syntax error in generated code",
-                "fix": "Applied automatic brace/structure correction"
+                "root_cause": "Syntax error",
+                "fix": "Auto brace correction"
             }
         }
 
-    # 🔥 STEP 2: LLM FIX
+    # =========================
+    # 🔥 STEP 2: LLM CALL
+    # =========================
     prompt = f"""
 You are a senior automotive C++ engineer.
 
@@ -140,24 +134,13 @@ ERROR:
 FILES:
 {files}
 
-=========================
-CRITICAL INSTRUCTIONS
-=========================
-
-- You MUST fix the failing test
-- You MUST change the logic (do not return same code)
-- Carefully handle boundary conditions
-- Fix comparison operators if needed (<, <=, >, >=)
-- Handle edge cases (zero, negative, infinity)
-- If needed, fix test expectations also
+CRITICAL:
+- You MUST fix the issue
+- You MUST change logic (no same code)
+- Handle boundary + edge cases
 - Return ALL files
-- DO NOT return identical code
 
-=========================
-STRICT OUTPUT FORMAT
-=========================
-
-Return ONLY valid JSON.
+STRICT JSON FORMAT:
 
 {{
   "files":[
@@ -173,8 +156,16 @@ Return ONLY valid JSON.
 """
 
     try:
+        # 🔥 LOG PROMPT
+        print("SENDING: {'step': 'debug_prompt'}")
+        print(prompt[:1000])
+
         response = llm.invoke(prompt)
         text = (response.content or "").strip()
+
+        # 🔥 LOG RAW RESPONSE
+        print("SENDING: {'step': 'debug_raw_response'}")
+        print(text[:1000])
 
         if not text:
             print("SENDING: {'step': 'debug_empty_response'}")
@@ -186,7 +177,16 @@ Return ONLY valid JSON.
             print("SENDING: {'step': 'debug_json_parse_failed'}")
             return {"files": files}
 
-        updated_files = _normalize_files(parsed.get("files", []))
+        updated_files = parsed.get("files")
+
+        # 🔥 STRICT VALIDATION
+        if not isinstance(updated_files, list):
+            print("SENDING: {'step': 'debug_invalid_files_structure'}")
+            return {"files": files}
+
+        updated_files = _normalize_files(updated_files)
+
+        print(f"SENDING: {{'step': 'debug_parsed_files_count', 'count': {len(updated_files)}}}")
 
         if not updated_files:
             print("SENDING: {'step': 'debug_no_files'}")
@@ -198,11 +198,12 @@ Return ONLY valid JSON.
             if f["filename"] not in returned:
                 updated_files.append(f)
 
-        # 🔥 STEP 3: FORCE CHANGE IF LLM FAILS
+        # =========================
+        # 🔥 STEP 3: FORCE CHANGE
+        # =========================
         if not _files_changed(files, updated_files):
             print("SENDING: {'step': 'debug_no_change_detected'}")
 
-            # 🔥 FORCE MINIMAL CHANGE (avoid stagnation)
             forced = []
             for f in files:
                 forced.append({
@@ -215,8 +216,8 @@ Return ONLY valid JSON.
             return {
                 "files": forced,
                 "debug_summary": {
-                    "root_cause": "LLM failed to modify code",
-                    "fix": "Forced minimal change to trigger rewrite"
+                    "root_cause": "LLM returned unchanged code",
+                    "fix": "Forced minimal mutation"
                 }
             }
 
@@ -233,7 +234,7 @@ Return ONLY valid JSON.
         return {
             "files": files,
             "debug_summary": {
-                "root_cause": "Exception during debug",
+                "root_cause": "Exception",
                 "fix": str(e)
             }
         }
