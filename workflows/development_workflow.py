@@ -12,6 +12,9 @@ from tools.build_tool import build_and_test
 from tools.test_parser import parse_ctest_output
 from tools.confidence_scorer import compute_confidence
 
+# 🔥 NEW IMPORT
+from utils.logger import send_log, send_step
+
 
 langfuse = Langfuse()
 
@@ -54,6 +57,8 @@ def run_workflow(requirement):
 
     logs = []
 
+    send_step("start")
+
     try:
         # =========================
         # 🧠 PLAN
@@ -63,7 +68,7 @@ def run_workflow(requirement):
         plan = create_plan(requirement, trace=trace, parent_span=plan_span)
 
         plan_span.end(output=plan)
-        logs.append("📋 Plan created")
+        send_log(logs, "📋 Plan created")
 
         # =========================
         # ⚙️ CODE GEN
@@ -95,26 +100,28 @@ def run_workflow(requirement):
                 files = generated_files
                 break
 
-            logs.append(f"⚠️ Generation attempt {gen_attempt} missing files: {missing}")
+            send_log(logs, f"⚠️ Generation attempt {gen_attempt} missing files: {missing}")
 
         if not files:
             raise ValueError("❌ Code generation failed")
 
         code_span.end(output={"file_count": len(files)})
 
+        send_step("code_generated", {"files": [f["filename"] for f in files]})
+
         # INITIAL WRITE
         clean_generated_folder()
         write_result = write_files(files)
 
-        logs.append(f"DEBUG: Initial write → {write_result}")
+        send_log(logs, f"DEBUG: Initial write → {write_result}")
 
         if not write_result.get("success"):
-            logs.append(f"⚠️ Initial write failed: {write_result.get('error')}")
+            send_log(logs, f"⚠️ Initial write failed: {write_result.get('error')}")
 
         generate_cmake(files)
 
-        logs.append("📁 Files written")
-        logs.append("⚙️ CMake generated")
+        send_log(logs, "📁 Files written")
+        send_log(logs, "⚙️ CMake generated")
 
         # =========================
         # 🔁 RETRY LOOP
@@ -124,27 +131,29 @@ def run_workflow(requirement):
         for attempt in range(MAX_RETRIES):
 
             try:
-                logs.append(f"\n=== Attempt {attempt} ===")
+                send_step("build_attempt", {"attempt": attempt})
 
                 output = build_and_test()
 
                 parsed = parse_ctest_output(output) or {"failed": 1}
                 confidence = compute_confidence(parsed) or {"status": "retry"}
 
-                logs.append(f"📊 Test Summary: {parsed}")
-                logs.append(f"📈 Confidence Score: {confidence.get('confidence_score')}")
+                send_step("test_result", {
+                    "parsed": parsed,
+                    "confidence": confidence
+                })
 
                 if parsed.get("failed", 0) > 0:
-                    logs.append(parsed.get("summary"))
+                    send_log(logs, parsed.get("summary"))
 
                 # ✅ SUCCESS
                 if confidence.get("status") == "success":
-                    logs.append("✅ All tests passed")
+                    send_log(logs, "✅ All tests passed")
                     trace.end(output="success")
                     langfuse.flush()
                     return {"status": "success", "logs": logs}
 
-                logs.append("🔧 Debugging...")
+                send_log(logs, "🔧 Debugging...")
 
                 # =========================
                 # DEBUG
@@ -155,23 +164,23 @@ def run_workflow(requirement):
                     trace=trace
                 )
 
-                # 🔥 CRITICAL VALIDATION
+                # 🔥 VALIDATION
                 if not isinstance(fix_result, dict):
-                    logs.append(f"🚨 Debug agent returned invalid result: {type(fix_result)}")
+                    send_log(logs, f"🚨 Debug agent returned invalid result: {type(fix_result)}")
                     continue
 
-                logs.append(f"DEBUG: fix_result keys = {list(fix_result.keys())}")
+                send_log(logs, f"DEBUG: fix_result keys = {list(fix_result.keys())}")
 
                 updated_files = fix_result.get("files")
 
                 if not isinstance(updated_files, list):
-                    logs.append(f"🚨 Debug files invalid type: {type(updated_files)}")
+                    send_log(logs, f"🚨 Debug files invalid type: {type(updated_files)}")
                     continue
 
-                logs.append(f"DEBUG: Raw debug files count = {len(updated_files)}")
+                send_log(logs, f"DEBUG: Raw debug files count = {len(updated_files)}")
 
                 if not updated_files:
-                    logs.append("⚠️ Debug returned empty files list")
+                    send_log(logs, "⚠️ Debug returned empty files list")
                     continue
 
                 # =========================
@@ -190,36 +199,36 @@ def run_workflow(requirement):
                                 "content": content
                             })
 
-                logs.append(f"DEBUG: Normalized files count = {len(normalized_files)}")
+                send_log(logs, f"DEBUG: Normalized files count = {len(normalized_files)}")
 
                 if not normalized_files:
-                    logs.append("⚠️ No valid normalized files → skipping")
+                    send_log(logs, "⚠️ No valid normalized files → skipping")
                     continue
 
                 # =========================
                 # WRITE FILES
                 # =========================
-                logs.append(f"DEBUG: Writing {len(normalized_files)} files")
+                send_log(logs, f"DEBUG: Writing {len(normalized_files)} files")
 
                 try:
-                    logs.append(f"DEBUG: First file snippet → {normalized_files[0]['content'][:100]}")
+                    send_log(logs, f"DEBUG: First file snippet → {normalized_files[0]['content'][:100]}")
                 except Exception:
                     pass
 
                 write_result = write_files(normalized_files)
 
-                logs.append(f"DEBUG: Write result → {write_result}")
+                send_log(logs, f"DEBUG: Write result → {write_result}")
 
                 if not write_result.get("success"):
-                    logs.append(f"⚠️ Write failed: {write_result.get('error')}")
+                    send_log(logs, f"⚠️ Write failed: {write_result.get('error')}")
                     continue
 
                 files = normalized_files
 
-                logs.append(f"✅ Fix applied ({write_result.get('count')} files)")
+                send_log(logs, f"✅ Fix applied ({write_result.get('count')} files)")
 
             except Exception as loop_error:
-                logs.append(f"🚨 Attempt {attempt} crashed: {loop_error}")
+                send_log(logs, f"🚨 Attempt {attempt} crashed: {loop_error}")
                 continue
 
         trace.end(level="ERROR", status_message="Max retries exceeded")
