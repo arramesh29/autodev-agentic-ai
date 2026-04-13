@@ -58,27 +58,45 @@ def clean_build_folder():
             print(f"SENDING: {{'step': 'build_clean_failed', 'error': '{str(e)}'}}")
 
 
-# 🔥 FIXED NORMALIZE (handles dict also)
+# 🔥 STRONG NORMALIZE (FIXED)
 def normalize_files(files):
 
+    # handle dict wrapper
     if isinstance(files, dict):
-        files = [files]
+        if "files" in files:
+            files = files["files"]
+        else:
+            files = [files]
 
     if not isinstance(files, list):
+        print("SENDING: {'step': 'normalize_invalid_input'}")
         return []
 
     normalized = []
 
-    for f in files:
-        if isinstance(f, dict):
-            filename = f.get("filename")
-            content = f.get("content")
+    for idx, f in enumerate(files):
 
-            if isinstance(filename, str) and filename.strip() and isinstance(content, str):
-                normalized.append({
-                    "filename": filename.strip(),
-                    "content": content
-                })
+        if not isinstance(f, dict):
+            print(f"SENDING: {{'step': 'normalize_invalid_item', 'index': {idx}}}")
+            continue
+
+        filename = f.get("filename")
+        content = f.get("content")
+
+        if not isinstance(filename, str) or not filename.strip():
+            print(f"SENDING: {{'step': 'normalize_invalid_filename', 'index': {idx}}}")
+            continue
+
+        if not isinstance(content, str):
+            print(f"SENDING: {{'step': 'normalize_invalid_content', 'file': '{filename}'}}")
+            continue
+
+        normalized.append({
+            "filename": filename.strip(),
+            "content": content
+        })
+
+    print(f"SENDING: {{'step': 'normalize_success', 'count': {len(normalized)}}}")
 
     return normalized
 
@@ -149,6 +167,7 @@ def run_workflow(requirement):
             return
 
         send_step("debug_start")
+        send_step("debug_llm_call_start")
 
         # =========================
         # DEBUG
@@ -164,7 +183,9 @@ def run_workflow(requirement):
         except Exception as e:
             send_step("debug_error", {"message": str(e)})
 
-        # 🔥 LOG RAW DEBUG OUTPUT TYPE
+        send_step("debug_llm_call_end")
+
+        # 🔥 DEBUG RESULT TYPE
         send_step("debug_result_type", {
             "type": str(type(fix_result))
         })
@@ -172,18 +193,22 @@ def run_workflow(requirement):
         updated_files = None
 
         if isinstance(fix_result, dict):
-            updated_files = fix_result.get("files")
+            candidate = fix_result.get("files")
 
-        # 🔥 LOG BEFORE VALIDATION
-        send_step("debug_files_raw", {
-            "is_list": isinstance(updated_files, list),
-            "length": len(updated_files) if isinstance(updated_files, list) else "invalid"
-        })
+            send_step("debug_files_pre_normalize", {
+                "type": str(type(candidate)),
+                "length": len(candidate) if isinstance(candidate, list) else "invalid"
+            })
 
-        # 🔥 FALLBACK WITH VISIBILITY
+            if isinstance(candidate, list):
+                updated_files = candidate
+
+        # 🔥 STRICT FALLBACK
         if not isinstance(updated_files, list) or len(updated_files) == 0:
-            send_step("debug_fallback_to_previous_files")
+            send_step("debug_invalid_output_fallback")
             updated_files = files
+        else:
+            send_step("debug_valid_output", {"count": len(updated_files)})
 
         # =========================
         # NORMALIZE
@@ -209,9 +234,6 @@ def run_workflow(requirement):
 
         send_step("write_result", write_result)
 
-        # =========================
-        # STATE UPDATE
-        # =========================
         files = normalized_files
 
     send_step("failed")
