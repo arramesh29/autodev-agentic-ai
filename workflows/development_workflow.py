@@ -12,7 +12,6 @@ from tools.build_tool import build_and_test
 from tools.test_parser import parse_ctest_output
 from tools.confidence_scorer import compute_confidence
 
-# 🔥 NEW IMPORT
 from utils.logger import send_log, send_step
 
 
@@ -109,7 +108,9 @@ def run_workflow(requirement):
 
         send_step("code_generated", {"files": [f["filename"] for f in files]})
 
+        # =========================
         # INITIAL WRITE
+        # =========================
         clean_generated_folder()
         write_result = write_files(files)
 
@@ -183,8 +184,21 @@ def run_workflow(requirement):
                     send_log(logs, "⚠️ Debug returned empty files list")
                     continue
 
+                # 🔥🔥🔥 CRITICAL FIX: IMMEDIATE WRITE
+                send_log(logs, f"🔥 DEBUG RAW WRITE START ({len(updated_files)} files)")
+
+                raw_write_result = write_files(updated_files)
+
+                send_log(logs, f"🔥 DEBUG RAW WRITE RESULT → {raw_write_result}")
+
+                if raw_write_result.get("success"):
+                    files = updated_files
+                    send_log(logs, "🔥 DEBUG RAW WRITE SUCCESS")
+                else:
+                    send_log(logs, "❌ DEBUG RAW WRITE FAILED")
+
                 # =========================
-                # NORMALIZATION
+                # NORMALIZATION (UNCHANGED)
                 # =========================
                 normalized_files = []
 
@@ -206,7 +220,7 @@ def run_workflow(requirement):
                     continue
 
                 # =========================
-                # WRITE FILES
+                # EXISTING WRITE LOGIC (PRESERVED)
                 # =========================
                 send_log(logs, f"DEBUG: Writing {len(normalized_files)} files")
 
