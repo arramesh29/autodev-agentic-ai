@@ -7,9 +7,12 @@ def write_files(files):
     os.makedirs(output_dir, exist_ok=True)
 
     # =========================
-    # 🔥 NORMALIZE INPUT FIRST
+    # 🔥 RAW INPUT LOG (NEW)
     # =========================
+    print(f"SENDING: {{'step': 'write_input_type', 'type': '{type(files)}'}}")
+
     if isinstance(files, dict):
+        print("SENDING: {'step': 'write_input_dict_wrapped'}")
         files = [files]
 
     if not isinstance(files, list):
@@ -19,7 +22,6 @@ def write_files(files):
             "error": f"Invalid files input type: {type(files)}"
         }
 
-    # 🔥 ENTRY LOG (AFTER NORMALIZATION)
     print(f"SENDING: {{'step': 'write_files_called', 'file_count': {len(files)}}}")
 
     valid_count = 0
@@ -32,7 +34,9 @@ def write_files(files):
     # =========================
     for idx, f in enumerate(files):
 
-        # 🔥 STRUCTURE LOG
+        # 🔥 FULL STRUCTURE LOG (NEW)
+        print(f"SENDING: {{'step': 'file_raw', 'index': {idx}, 'keys': {list(f.keys()) if isinstance(f, dict) else 'invalid'}}}")
+
         if not isinstance(f, dict):
             print(f"SENDING: {{'step': 'file_invalid_structure', 'index': {idx}}}")
             errors.append(f"Not dict: {f}")
@@ -43,7 +47,7 @@ def write_files(files):
 
         # 🔥 VALIDATION
         if not isinstance(filename, str) or not filename.strip():
-            print(f"SENDING: {{'step': 'invalid_filename', 'index': {idx}}}")
+            print(f"SENDING: {{'step': 'invalid_filename', 'index': {idx}, 'value': '{filename}'}}")
             errors.append(f"Invalid filename: {f}")
             continue
 
@@ -56,19 +60,16 @@ def write_files(files):
         path = os.path.join(output_dir, filename)
 
         try:
-            # 🔥 READ EXISTING CONTENT
             existing_content = None
             if os.path.exists(path):
                 with open(path, "r", encoding="utf-8") as file:
                     existing_content = file.read()
 
-            # 🔥 CONTENT SIZE LOG (NEW)
             new_size = len(content)
             old_size = len(existing_content) if existing_content else 0
 
             print(f"SENDING: {{'step': 'file_compare', 'file': '{filename}', 'old_size': {old_size}, 'new_size': {new_size}}}")
 
-            # 🔥 CHANGE DETECTION
             if existing_content == content:
                 print(f"SENDING: {{'step': 'file_unchanged', 'file': '{filename}'}}")
                 unchanged_files.append(filename)
@@ -76,7 +77,6 @@ def write_files(files):
                 print(f"SENDING: {{'step': 'file_write', 'file': '{filename}'}}")
                 changed_files.append(filename)
 
-            # 🔥 ALWAYS WRITE
             with open(path, "w", encoding="utf-8") as file:
                 file.write(content)
 
@@ -85,6 +85,12 @@ def write_files(files):
         except Exception as e:
             print(f"SENDING: {{'step': 'file_write_error', 'file': '{filename}', 'error': '{str(e)}'}}")
             errors.append(f"{filename}: {str(e)}")
+
+    # =========================
+    # 🔥 SANITY CHECK (NEW)
+    # =========================
+    if valid_count != len(files):
+        print(f"SENDING: {{'step': 'partial_write_warning', 'valid': {valid_count}, 'total': {len(files)}}}")
 
     # =========================
     # 🔥 SUMMARY LOG
