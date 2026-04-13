@@ -49,19 +49,20 @@ def clean_generated_folder():
 def normalize_files(files):
     normalized = []
 
-    if not isinstance(files, list):
-        return normalized
+    if isinstance(files, list):
+        for f in files:
+            try:
+                if isinstance(f, dict):
+                    filename = f.get("filename")
+                    content = f.get("content")
 
-    for f in files:
-        if isinstance(f, dict):
-            filename = f.get("filename")
-            content = f.get("content")
-
-            if isinstance(filename, str) and filename.strip() and isinstance(content, str):
-                normalized.append({
-                    "filename": filename.strip(),
-                    "content": content
-                })
+                    if isinstance(filename, str) and filename.strip() and isinstance(content, str):
+                        normalized.append({
+                            "filename": filename.strip(),
+                            "content": content
+                        })
+            except Exception as e:
+                print(f"SENDING: {{'step': 'normalize_error', 'message': '{str(e)}'}}")
 
     return normalized
 
@@ -99,6 +100,8 @@ def run_workflow(requirement):
 
         # INITIAL WRITE
         clean_generated_folder()
+
+        send_log(logs, "🔥 INITIAL WRITE")
         write_files(files)
 
         generate_cmake(files)
@@ -129,45 +132,54 @@ def run_workflow(requirement):
             send_log(logs, "🔧 Debugging...")
 
             # =========================
-            # DEBUG
+            # DEBUG (SAFE BLOCK)
             # =========================
-            fix_result = fix_code(
-                parsed.get("summary", output),
-                files,
-                trace=trace
-            )
+            try:
+                fix_result = fix_code(
+                    parsed.get("summary", output),
+                    files,
+                    trace=trace
+                )
 
-            updated_files = None
+                updated_files = None
 
-            if isinstance(fix_result, dict):
-                updated_files = fix_result.get("files")
+                if isinstance(fix_result, dict):
+                    updated_files = fix_result.get("files")
 
-            send_log(logs, f"DEBUG RAW TYPE: {type(updated_files)}")
+                send_log(logs, f"DEBUG RAW TYPE: {type(updated_files)}")
 
-            # 🔥 FORCE VALID DATA
-            if not isinstance(updated_files, list):
-                send_log(logs, "⚠️ Invalid debug output → fallback")
+            except Exception as e:
+                send_log(logs, f"🚨 Debug failed: {str(e)}")
+                updated_files = files  # fallback
+
+            # =========================
+            # FORCE VALID DATA
+            # =========================
+            if not isinstance(updated_files, list) or not updated_files:
+                send_log(logs, "⚠️ Using previous files (fallback)")
                 updated_files = files
 
-            if not updated_files:
-                send_log(logs, "⚠️ Empty debug output → fallback")
-                updated_files = files
-
-            # 🔥 NORMALIZE (NEVER SKIP)
+            # =========================
+            # NORMALIZE (SAFE)
+            # =========================
             normalized_files = normalize_files(updated_files)
 
             if not normalized_files:
                 send_log(logs, "⚠️ Normalization failed → fallback")
                 normalized_files = files
 
-            # 🔥🚨 GUARANTEED WRITE (NO CONTINUE ABOVE)
+            # =========================
+            # 🔥 GUARANTEED WRITE
+            # =========================
             send_log(logs, f"🔥 FORCED WRITE {len(normalized_files)} FILES")
 
-            write_result = write_files(normalized_files)
+            try:
+                write_result = write_files(normalized_files)
+                send_log(logs, f"🔥 WRITE RESULT → {write_result}")
+            except Exception as e:
+                send_log(logs, f"🚨 Write failed: {str(e)}")
 
-            send_log(logs, f"🔥 WRITE RESULT → {write_result}")
-
-            # 🔥 ALWAYS UPDATE STATE
+            # ALWAYS update state
             files = normalized_files
 
         send_step("failed")
