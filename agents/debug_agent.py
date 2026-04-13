@@ -4,24 +4,39 @@ import re
 
 
 def _normalize_files(files):
-    normalized = []
 
     if isinstance(files, dict):
         files = [files]
 
     if not isinstance(files, list):
+        print("SENDING: {'step': 'normalize_invalid_input'}")
         return []
 
-    for f in files:
-        if isinstance(f, dict):
-            filename = f.get("filename")
-            content = f.get("content")
+    normalized = []
 
-            if isinstance(filename, str) and isinstance(content, str):
-                normalized.append({
-                    "filename": filename.strip(),
-                    "content": content
-                })
+    for idx, f in enumerate(files):
+
+        if not isinstance(f, dict):
+            print(f"SENDING: {{'step': 'normalize_invalid_item', 'index': {idx}}}")
+            continue
+
+        filename = f.get("filename")
+        content = f.get("content")
+
+        if not isinstance(filename, str) or not filename.strip():
+            print(f"SENDING: {{'step': 'normalize_invalid_filename', 'index': {idx}}}")
+            continue
+
+        if not isinstance(content, str):
+            print(f"SENDING: {{'step': 'normalize_invalid_content', 'file': '{filename}'}}")
+            continue
+
+        normalized.append({
+            "filename": filename.strip(),
+            "content": content
+        })
+
+    print(f"SENDING: {{'step': 'normalize_success', 'count': {len(normalized)}}}")
 
     return normalized
 
@@ -37,29 +52,26 @@ def _files_changed(old_files, new_files):
 
 
 def _extract_json(text):
+
     text = text.replace("```json", "").replace("```", "").strip()
 
     if text.lower().startswith("json"):
         text = text[4:].strip()
 
-    start = text.find("{")
-    end = text.rfind("}")
+    # 🔥 safer extraction
+    matches = re.findall(r"\{[\s\S]*?\}", text)
 
-    if start == -1 or end == -1:
-        return None
+    for candidate in matches:
+        try:
+            parsed = json.loads(candidate)
+            return parsed
+        except Exception:
+            continue
 
-    json_str = text[start:end + 1]
-
-    json_str = re.sub(r",\s*}", "}", json_str)
-    json_str = re.sub(r",\s*]", "]", json_str)
-
-    try:
-        return json.loads(json_str)
-    except Exception:
-        return None
+    print("SENDING: {'step': 'json_extraction_failed'}")
+    return None
 
 
-# 🔥 SYNTAX DETECTOR (UNCHANGED)
 def _is_syntax_error(error_log):
     if not isinstance(error_log, str):
         return False
@@ -75,8 +87,8 @@ def _is_syntax_error(error_log):
     ])
 
 
-# 🔥 SYNTAX FIX (UNCHANGED)
 def _force_syntax_fix(files):
+
     fixed_files = []
 
     for f in files:
@@ -107,7 +119,7 @@ def fix_code(error_log, files, trace=None, parent_span=None):
     files = _normalize_files(files)
 
     # =========================
-    # 🔥 STEP 1: SYNTAX FIX
+    # SYNTAX FIX
     # =========================
     if _is_syntax_error(error_log):
         print("SENDING: {'step': 'syntax_error_detected'}")
@@ -119,11 +131,13 @@ def fix_code(error_log, files, trace=None, parent_span=None):
             "debug_summary": {
                 "root_cause": "Syntax error",
                 "fix": "Auto brace correction"
-            }
+            },
+            "llm_prompt": None,
+            "llm_response": None
         }
 
     # =========================
-    # 🔥 STEP 2: LLM CALL
+    # LLM CALL
     # =========================
     prompt = f"""
 You are a senior automotive C++ engineer.
@@ -139,6 +153,7 @@ CRITICAL:
 - You MUST change logic (no same code)
 - Handle boundary + edge cases
 - Return ALL files
+- Ensure valid compilable C++
 
 STRICT JSON FORMAT:
 
@@ -156,33 +171,30 @@ STRICT JSON FORMAT:
 """
 
     try:
-        # 🔥 LOG PROMPT
         print("SENDING: {'step': 'debug_prompt'}")
         print(prompt[:1000])
 
         response = llm.invoke(prompt)
         text = (response.content or "").strip()
 
-        # 🔥 LOG RAW RESPONSE
         print("SENDING: {'step': 'debug_raw_response'}")
         print(text[:1000])
 
         if not text:
             print("SENDING: {'step': 'debug_empty_response'}")
-            return {"files": files}
+            return {"files": files, "llm_prompt": prompt, "llm_response": text}
 
         parsed = _extract_json(text)
 
         if not parsed:
             print("SENDING: {'step': 'debug_json_parse_failed'}")
-            return {"files": files}
+            return {"files": files, "llm_prompt": prompt, "llm_response": text}
 
         updated_files = parsed.get("files")
 
-        # 🔥 STRICT VALIDATION
         if not isinstance(updated_files, list):
             print("SENDING: {'step': 'debug_invalid_files_structure'}")
-            return {"files": files}
+            return {"files": files, "llm_prompt": prompt, "llm_response": text}
 
         updated_files = _normalize_files(updated_files)
 
@@ -190,7 +202,7 @@ STRICT JSON FORMAT:
 
         if not updated_files:
             print("SENDING: {'step': 'debug_no_files'}")
-            return {"files": files}
+            return {"files": files, "llm_prompt": prompt, "llm_response": text}
 
         # ensure all files present
         returned = {f["filename"] for f in updated_files}
@@ -199,7 +211,7 @@ STRICT JSON FORMAT:
                 updated_files.append(f)
 
         # =========================
-        # 🔥 STEP 3: FORCE CHANGE
+        # FORCE CHANGE
         # =========================
         if not _files_changed(files, updated_files):
             print("SENDING: {'step': 'debug_no_change_detected'}")
@@ -217,15 +229,19 @@ STRICT JSON FORMAT:
                 "files": forced,
                 "debug_summary": {
                     "root_cause": "LLM returned unchanged code",
-                    "fix": "Forced minimal mutation"
-                }
+                    "fix": "Forced mutation"
+                },
+                "llm_prompt": prompt,
+                "llm_response": text
             }
 
         print("SENDING: {'step': 'debug_fix_applied'}")
 
         return {
             "files": updated_files,
-            "debug_summary": parsed.get("debug_summary", {})
+            "debug_summary": parsed.get("debug_summary", {}),
+            "llm_prompt": prompt,
+            "llm_response": text
         }
 
     except Exception as e:
@@ -236,5 +252,7 @@ STRICT JSON FORMAT:
             "debug_summary": {
                 "root_cause": "Exception",
                 "fix": str(e)
-            }
+            },
+            "llm_prompt": prompt,
+            "llm_response": str(e)
         }
