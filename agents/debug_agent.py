@@ -4,7 +4,6 @@ import re
 
 
 def _normalize_files(files):
-    """Ensure safe structure for files"""
     normalized = []
 
     if isinstance(files, dict):
@@ -27,9 +26,18 @@ def _normalize_files(files):
     return normalized
 
 
+def _files_changed(old_files, new_files):
+    old_map = {f["filename"]: f["content"] for f in old_files}
+    new_map = {f["filename"]: f["content"] for f in new_files}
+
+    for k in old_map:
+        if k not in new_map or old_map[k] != new_map[k]:
+            return True
+    return False
+
+
 def fix_code(error_log, files, trace=None, parent_span=None):
 
-    # 🔥 Normalize incoming files (CRITICAL)
     files = _normalize_files(files)
 
     span = None
@@ -40,12 +48,16 @@ def fix_code(error_log, files, trace=None, parent_span=None):
             else trace.span(name="fix_code_agent")
         )
 
-    original_filenames = {f["filename"] for f in files}
+    original_files = files
 
-    # =========================
-    # 🔥 STRICT PROMPT
-    # =========================
-    prompt = f"""
+    # 🔁 MULTI-ATTEMPT DEBUG (CRITICAL FIX)
+    MAX_INTERNAL_RETRY = 2
+
+    for attempt in range(MAX_INTERNAL_RETRY):
+
+        print(f"SENDING: {{'step': 'debug_attempt', 'attempt': {attempt}}}")
+
+        prompt = f"""
 You are a senior automotive C++ engineer.
 
 ERROR:
@@ -59,10 +71,11 @@ CRITICAL INSTRUCTIONS
 =========================
 
 - Fix the issue in the code
-- Modify logic if required
+- You MUST change logic if previous attempt failed
+- If same failure repeats, rethink approach
 - Handle edge cases (NaN, infinity)
-- If the failure is with test case, modify test case
-- Return ALL the 3 files specified in format always
+- If test is wrong, fix test
+- Return ALL files
 
 =========================
 STRICT OUTPUT FORMAT
@@ -70,150 +83,81 @@ STRICT OUTPUT FORMAT
 
 Return ONLY valid JSON.
 
-Schema:
-
-{{
-  "files": [
-    {{
-      "filename": "string",
-      "content": "string"
-    }}
-  ],
-  "debug_summary": {{
-    "root_cause": "string",
-    "fix": "string"
-  }}
-}}
-
-=========================
-STRICT RULES
-=========================
-
-- "files" MUST be a list
-- Each item MUST be an object
-- NO strings inside "files"
-
-❌ INVALID:
-"files": ["code"]
-
-❌ INVALID:
-"files": "string"
-
-❌ INVALID:
-missing filename/content
-
-✅ VALID:
-Files Format:
-
 {{
   "files":[
-    {{"filename":"aeb_controller.h","content":"header code"}},
-    {{"filename":"aeb_controller.cpp","content":"implementation"}},
-    {{"filename":"test_aeb_controller.cpp","content":"GoogleTest code"}}
-  ]
+    {{"filename":"aeb_controller.h","content":"..."}},
+    {{"filename":"aeb_controller.cpp","content":"..."}},
+    {{"filename":"test_aeb_controller.cpp","content":"..."}}
+  ],
+  "debug_summary": {{
+    "root_cause": "...",
+    "fix": "..."
+  }}
 }}
-
-If format is wrong, system will reject your response.
-
-Return ONLY JSON.
 """
 
-    text = None
-
-    try:
-        # =========================
-        # 🔥 LLM CALL WITH RETRY
-        # =========================
-        MAX_RETRY = 5
-        for _ in range(MAX_RETRY):
+        try:
             response = llm.invoke(prompt)
-
-            if not response or not hasattr(response, "content"):
-                continue
-
             text = (response.content or "").strip()
 
-            if text and len(text) > 30:
-                break
+            if not text:
+                continue
 
-        if not text:
-            raise ValueError("Empty LLM response")
+            # CLEAN
+            text = text.replace("```json", "").replace("```", "").strip()
 
-        # =========================
-        # 🔥 CLEAN RESPONSE
-        # =========================
-        text = text.replace("```json", "").replace("```", "").strip()
+            if text.lower().startswith("json"):
+                text = text[4:].strip()
 
-        if text.lower().startswith("json"):
-            text = text[4:].strip()
+            start = text.find("{")
+            end = text.rfind("}")
 
-        start = text.find("{")
-        end = text.rfind("}")
+            if start == -1 or end == -1:
+                continue
 
-        if start == -1 or end == -1:
-            raise ValueError("No JSON found")
+            json_str = text[start:end + 1]
 
-        json_str = text[start:end + 1]
+            json_str = re.sub(r",\s*}", "}", json_str)
+            json_str = re.sub(r",\s*]", "]", json_str)
 
-        json_str = re.sub(r",\s*}", "}", json_str)
-        json_str = re.sub(r",\s*]", "]", json_str)
+            parsed = json.loads(json_str)
 
-        parsed = json.loads(json_str)
+            updated_files = _normalize_files(parsed.get("files", []))
 
-        updated_files = parsed.get("files", [])
+            if not updated_files:
+                continue
 
-        # =========================
-        # 🔥 SANITIZE OUTPUT (CRITICAL FIX)
-        # =========================
-        updated_files = _normalize_files(updated_files)
+            # 🔥 ENSURE COMPLETENESS
+            returned = {f["filename"] for f in updated_files}
+            for f in original_files:
+                if f["filename"] not in returned:
+                    updated_files.append(f)
 
-        # =========================
-        # 🔥 FALLBACK IF EMPTY
-        # =========================
-        if not updated_files:
-            print("⚠️ No valid files from LLM → fallback to previous files")
-            updated_files = files
+            # 🔥 KEY FIX: detect no change
+            if not _files_changed(original_files, updated_files):
+                print("SENDING: {'step': 'debug_no_change'}")
+                continue
 
-        # =========================
-        # 🔥 ENSURE COMPLETENESS
-        # =========================
-        returned = {f["filename"] for f in updated_files}
+            print("SENDING: {'step': 'debug_fix_applied'}")
 
-        for f in files:
-            if f["filename"] not in returned:
-                updated_files.append(f)
+            debug_summary = parsed.get("debug_summary", {})
 
-        debug_summary = parsed.get("debug_summary", {
-            "root_cause": "Not provided",
-            "fix": "Not provided"
-        })
-
-        if span:
-            span.end(
-                output={
-                    "files_updated": len(updated_files),
-                    "root_cause": debug_summary.get("root_cause"),
-                    "fix": debug_summary.get("fix")
-                }
-            )
-
-        return {
-            "files": updated_files,
-            "debug_summary": debug_summary
-        }
-
-    except Exception as e:
-
-        print(f"⚠️ Debug agent error: {e}")
-
-        if span:
-            span.end(level="ERROR", status_message=str(e))
-
-        # 🔥 NEVER BREAK WORKFLOW
-        return {
-            "files": files,
-            "debug_summary": {
-                "root_cause": "Debug failed",
-                "fix": "No changes applied"
+            return {
+                "files": updated_files,
+                "debug_summary": debug_summary
             }
+
+        except Exception as e:
+            print(f"SENDING: {{'step': 'debug_error', 'message': '{str(e)}'}}")
+            continue
+
+    # 🔥 FINAL FALLBACK
+    print("SENDING: {'step': 'debug_fallback'}")
+
+    return {
+        "files": original_files,
+        "debug_summary": {
+            "root_cause": "No effective fix generated",
+            "fix": "Retry attempts exhausted"
         }
+    }
