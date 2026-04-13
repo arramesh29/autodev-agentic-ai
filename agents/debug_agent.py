@@ -36,7 +36,32 @@ def _files_changed(old_files, new_files):
     return False
 
 
+def _extract_json(text):
+    text = text.replace("```json", "").replace("```", "").strip()
+
+    if text.lower().startswith("json"):
+        text = text[4:].strip()
+
+    start = text.find("{")
+    end = text.rfind("}")
+
+    if start == -1 or end == -1:
+        return None
+
+    json_str = text[start:end + 1]
+
+    json_str = re.sub(r",\s*}", "}", json_str)
+    json_str = re.sub(r",\s*]", "]", json_str)
+
+    try:
+        return json.loads(json_str)
+    except Exception:
+        return None
+
+
 def fix_code(error_log, files, trace=None, parent_span=None):
+
+    print("SENDING: {'step': 'debug_start'}")
 
     files = _normalize_files(files)
 
@@ -48,16 +73,7 @@ def fix_code(error_log, files, trace=None, parent_span=None):
             else trace.span(name="fix_code_agent")
         )
 
-    original_files = files
-
-    # 🔁 MULTI-ATTEMPT DEBUG (CRITICAL FIX)
-    MAX_INTERNAL_RETRY = 2
-
-    for attempt in range(MAX_INTERNAL_RETRY):
-
-        print(f"SENDING: {{'step': 'debug_attempt', 'attempt': {attempt}}}")
-
-        prompt = f"""
+    prompt = f"""
 You are a senior automotive C++ engineer.
 
 ERROR:
@@ -70,11 +86,12 @@ FILES:
 CRITICAL INSTRUCTIONS
 =========================
 
-- Fix the issue in the code
-- You MUST change logic if previous attempt failed
-- If same failure repeats, rethink approach
-- Handle edge cases (NaN, infinity)
-- If test is wrong, fix test
+- You MUST fix the failing test
+- You MUST change the logic (do not return same code)
+- Carefully handle boundary conditions
+- Fix comparison operators if needed (<, <=, >, >=)
+- Handle edge cases (zero, negative, infinity)
+- If needed, fix test expectations also
 - Return ALL files
 
 =========================
@@ -96,68 +113,58 @@ Return ONLY valid JSON.
 }}
 """
 
-        try:
-            response = llm.invoke(prompt)
-            text = (response.content or "").strip()
+    try:
+        response = llm.invoke(prompt)
+        text = (response.content or "").strip()
 
-            if not text:
-                continue
+        if not text:
+            print("SENDING: {'step': 'debug_empty_response'}")
+            return {"files": files}
 
-            # CLEAN
-            text = text.replace("```json", "").replace("```", "").strip()
+        parsed = _extract_json(text)
 
-            if text.lower().startswith("json"):
-                text = text[4:].strip()
+        if not parsed:
+            print("SENDING: {'step': 'debug_json_parse_failed'}")
+            return {"files": files}
 
-            start = text.find("{")
-            end = text.rfind("}")
+        updated_files = _normalize_files(parsed.get("files", []))
 
-            if start == -1 or end == -1:
-                continue
+        if not updated_files:
+            print("SENDING: {'step': 'debug_no_files'}")
+            return {"files": files}
 
-            json_str = text[start:end + 1]
+        # 🔥 ENSURE ALL FILES PRESENT
+        returned = {f["filename"] for f in updated_files}
+        for f in files:
+            if f["filename"] not in returned:
+                updated_files.append(f)
 
-            json_str = re.sub(r",\s*}", "}", json_str)
-            json_str = re.sub(r",\s*]", "]", json_str)
-
-            parsed = json.loads(json_str)
-
-            updated_files = _normalize_files(parsed.get("files", []))
-
-            if not updated_files:
-                continue
-
-            # 🔥 ENSURE COMPLETENESS
-            returned = {f["filename"] for f in updated_files}
-            for f in original_files:
-                if f["filename"] not in returned:
-                    updated_files.append(f)
-
-            # 🔥 KEY FIX: detect no change
-            if not _files_changed(original_files, updated_files):
-                print("SENDING: {'step': 'debug_no_change'}")
-                continue
-
-            print("SENDING: {'step': 'debug_fix_applied'}")
-
-            debug_summary = parsed.get("debug_summary", {})
+        # 🔥 HARD CHANGE ENFORCEMENT
+        if not _files_changed(files, updated_files):
+            print("SENDING: {'step': 'debug_no_change_detected'}")
 
             return {
-                "files": updated_files,
-                "debug_summary": debug_summary
+                "files": files,
+                "debug_summary": {
+                    "root_cause": "LLM returned unchanged code",
+                    "fix": "No changes applied"
+                }
             }
 
-        except Exception as e:
-            print(f"SENDING: {{'step': 'debug_error', 'message': '{str(e)}'}}")
-            continue
+        print("SENDING: {'step': 'debug_fix_applied'}")
 
-    # 🔥 FINAL FALLBACK
-    print("SENDING: {'step': 'debug_fallback'}")
-
-    return {
-        "files": original_files,
-        "debug_summary": {
-            "root_cause": "No effective fix generated",
-            "fix": "Retry attempts exhausted"
+        return {
+            "files": updated_files,
+            "debug_summary": parsed.get("debug_summary", {})
         }
-    }
+
+    except Exception as e:
+        print(f"SENDING: {{'step': 'debug_error', 'message': '{str(e)}'}}")
+
+        return {
+            "files": files,
+            "debug_summary": {
+                "root_cause": "Exception during debug",
+                "fix": str(e)
+            }
+        }
