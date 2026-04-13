@@ -58,12 +58,12 @@ def clean_build_folder():
             print(f"SENDING: {{'step': 'build_clean_failed', 'error': '{str(e)}'}}")
 
 
-# 🔥 STRONG NORMALIZE (FIXED)
+# 🔥 FINAL STRONG NORMALIZE (HARDENED)
 def normalize_files(files):
 
-    # handle dict wrapper
+    # 🔥 CRITICAL FIX: extract nested "files"
     if isinstance(files, dict):
-        if "files" in files:
+        if "files" in files and isinstance(files["files"], list):
             files = files["files"]
         else:
             files = [files]
@@ -148,7 +148,7 @@ def run_workflow(requirement):
     for attempt in range(MAX_RETRIES):
 
         print(f"🔥 WORKFLOW LOOP attempt={attempt}")
-        
+
         send_step("build_attempt", {
             "attempt": attempt,
             "source": "workflow",
@@ -191,43 +191,33 @@ def run_workflow(requirement):
 
         send_step("debug_llm_call_end")
 
-        # 🔥 DEBUG RESULT TYPE
-        send_step("debug_result_type", {
-            "type": str(type(fix_result))
-        })
-
+        # =========================
+        # 🔥 FINAL SAFE EXTRACTION
+        # =========================
         updated_files = None
 
         if isinstance(fix_result, dict):
             candidate = fix_result.get("files")
 
-            send_step("debug_files_pre_normalize", {
-                "type": str(type(candidate)),
-                "length": len(candidate) if isinstance(candidate, list) else "invalid"
-            })
-
             if isinstance(candidate, list):
                 updated_files = candidate
+            else:
+                print("SENDING: {'step': 'workflow_invalid_fix_result_structure'}")
 
-        # 🔥 STRICT FALLBACK
-        if not isinstance(updated_files, list) or len(updated_files) == 0:
-            send_step("debug_invalid_output_fallback")
+        if not isinstance(updated_files, list) or not updated_files:
+            print("SENDING: {'step': 'workflow_fallback_to_previous_files'}")
             updated_files = files
-        else:
-            send_step("debug_valid_output", {"count": len(updated_files)})
 
         # =========================
         # NORMALIZE
         # =========================
         normalized_files = normalize_files(updated_files)
 
-        send_step("normalized_files", {
-            "count": len(normalized_files)
-        })
-
         if not normalized_files:
-            send_step("normalization_failed_fallback")
+            print("SENDING: {'step': 'workflow_empty_after_normalization'}")
             normalized_files = files
+
+        print(f"SENDING: {{'step': 'workflow_files_ready_for_write', 'count': {len(normalized_files)}}}")
 
         # =========================
         # WRITE
