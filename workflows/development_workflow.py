@@ -117,7 +117,7 @@ def run_workflow(requirement):
     # =========================
     # RETRY LOOP
     # =========================
-    MAX_RETRIES = 5
+    MAX_RETRIES = 3
 
     for attempt in range(MAX_RETRIES):
 
