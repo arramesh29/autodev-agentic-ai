@@ -147,7 +147,13 @@ def run_workflow(requirement):
 
     for attempt in range(MAX_RETRIES):
 
-        send_step("build_attempt", {"attempt": attempt})
+        print(f"🔥 WORKFLOW LOOP attempt={attempt}")
+        
+        send_step("build_attempt", {
+            "attempt": attempt,
+            "source": "workflow",
+            "execution_id": trace.id if trace else "no-trace"
+        })
 
         clean_build_folder()
         generate_cmake(files)
