@@ -87,7 +87,7 @@ def run_workflow(requirement):
         send_step("plan_created")
 
         # =========================
-        # CODE GEN
+        # CODE GENERATION
         # =========================
         result = generate_code(plan)
 
@@ -98,11 +98,14 @@ def run_workflow(requirement):
 
         send_step("code_generated", {"files": [f["filename"] for f in files]})
 
+        # =========================
         # INITIAL WRITE
+        # =========================
         clean_generated_folder()
 
         send_log(logs, "🔥 INITIAL WRITE")
-        write_files(files)
+        write_result = write_files(files)
+        send_log(logs, f"WRITE RESULT → {write_result}")
 
         generate_cmake(files)
 
@@ -115,28 +118,33 @@ def run_workflow(requirement):
 
             send_step("build_attempt", {"attempt": attempt})
 
-            output = build_and_test()
+            try:
+                output = build_and_test()
 
-            parsed = parse_ctest_output(output) or {"failed": 1}
-            confidence = compute_confidence(parsed) or {"status": "retry"}
+                parsed = parse_ctest_output(output) or {"failed": 1}
+                confidence = compute_confidence(parsed) or {"status": "retry"}
 
-            send_step("test_result", {
-                "parsed": parsed,
-                "confidence": confidence
-            })
+                send_step("test_result", {
+                    "parsed": parsed,
+                    "confidence": confidence
+                })
 
-            if confidence.get("status") == "success":
-                send_step("success")
-                return
+                if confidence.get("status") == "success":
+                    send_step("success")
+                    return
 
-            send_log(logs, "🔧 Debugging...")
+                send_log(logs, "🔧 Debugging...")
+
+            except Exception as e:
+                send_log(logs, f"🚨 Build/Test failed: {str(e)}")
+                parsed = {"summary": str(e)}
 
             # =========================
-            # DEBUG (SAFE BLOCK)
+            # DEBUG (SAFE)
             # =========================
             try:
                 fix_result = fix_code(
-                    parsed.get("summary", output),
+                    parsed.get("summary"),
                     files,
                     trace=trace
                 )
@@ -150,7 +158,7 @@ def run_workflow(requirement):
 
             except Exception as e:
                 send_log(logs, f"🚨 Debug failed: {str(e)}")
-                updated_files = files  # fallback
+                updated_files = files
 
             # =========================
             # FORCE VALID DATA
@@ -169,7 +177,7 @@ def run_workflow(requirement):
                 normalized_files = files
 
             # =========================
-            # 🔥 GUARANTEED WRITE
+            # 🔥 GUARANTEED WRITE (OUTSIDE DEBUG TRY)
             # =========================
             send_log(logs, f"🔥 FORCED WRITE {len(normalized_files)} FILES")
 
