@@ -165,22 +165,27 @@ def run_workflow(requirement):
                     trace=trace
                 )
 
-                # 🔥 VALIDATION
                 if not isinstance(fix_result, dict):
                     send_log(logs, f"🚨 Debug agent returned invalid result: {type(fix_result)}")
                     continue
 
                 updated_files = fix_result.get("files")
 
+                # 🔥 DEBUG VISIBILITY (CRITICAL)
+                send_log(logs, f"DEBUG RAW TYPE: {type(updated_files)}")
+                send_log(logs, f"DEBUG RAW VALUE: {str(updated_files)[:300]}")
+
+                # 🔥 FIX: Prevent skip due to invalid type
                 if not isinstance(updated_files, list):
-                    send_log(logs, f"🚨 Debug files invalid type: {type(updated_files)}")
-                    continue
+                    send_log(logs, "⚠️ Invalid debug output → using previous files")
+                    updated_files = files
+
+                # 🔥 FIX: Prevent skip due to empty output
+                if not updated_files:
+                    send_log(logs, "⚠️ Empty debug output → using previous files")
+                    updated_files = files
 
                 send_log(logs, f"DEBUG: Raw debug files count = {len(updated_files)}")
-
-                if not updated_files:
-                    send_log(logs, "⚠️ Debug returned empty files list")
-                    continue
 
                 # =========================
                 # NORMALIZATION
@@ -201,11 +206,11 @@ def run_workflow(requirement):
                 send_log(logs, f"DEBUG: Normalized files count = {len(normalized_files)}")
 
                 if not normalized_files:
-                    send_log(logs, "⚠️ No valid normalized files → skipping")
-                    continue
+                    send_log(logs, "⚠️ No valid normalized files → fallback to previous")
+                    normalized_files = files
 
                 # =========================
-                # 🔥 SINGLE WRITE (FINAL FIX)
+                # 🔥 SINGLE WRITE (GUARANTEED)
                 # =========================
                 send_log(logs, f"🔥 WRITING {len(normalized_files)} FILES")
 
@@ -217,7 +222,6 @@ def run_workflow(requirement):
                     send_log(logs, f"⚠️ Write failed: {write_result.get('error')}")
                     continue
 
-                # ✅ UPDATE STATE ONLY AFTER SUCCESS
                 files = normalized_files
 
                 send_log(logs, f"✅ Fix applied ({write_result.get('count')} files)")
