@@ -1,4 +1,5 @@
 import os
+import shutil
 from langfuse import Langfuse
 
 from agents.planner_agent import create_plan
@@ -44,6 +45,18 @@ def clean_generated_folder():
             os.remove(os.path.join(output_dir, f))
         except Exception:
             pass
+
+
+# 🔥 NEW: CLEAN BUILD FOLDER (CRITICAL FIX)
+def clean_build_folder():
+    build_dir = "autodev_build"
+
+    if os.path.exists(build_dir):
+        try:
+            shutil.rmtree(build_dir)
+            print("SENDING: {'step': 'build_cleaned'}")
+        except Exception as e:
+            print(f"SENDING: {{'step': 'build_clean_failed', 'error': '{str(e)}'}}")
 
 
 def normalize_files(files):
@@ -110,6 +123,13 @@ def run_workflow(requirement):
 
         send_step("build_attempt", {"attempt": attempt})
 
+        # 🔥 CRITICAL: CLEAN BUILD EACH TIME
+        clean_build_folder()
+
+        # 🔥 REGENERATE CMAKE (ensures file sync)
+        generate_cmake(files)
+
+        # 🔥 BUILD + TEST
         output = build_and_test()
 
         parsed = parse_ctest_output(output) or {"failed": 1}
@@ -126,10 +146,9 @@ def run_workflow(requirement):
 
         send_step("debug_start")
 
-        # =====================================================
-        # 🔥 CRITICAL FIX: DEBUG + WRITE ATOMIC BLOCK
-        # =====================================================
-
+        # =========================
+        # DEBUG + WRITE
+        # =========================
         fix_result = None
 
         try:
@@ -141,29 +160,24 @@ def run_workflow(requirement):
         except Exception as e:
             send_step("debug_error", {"message": str(e)})
 
-        # ---------- FORCE FILE EXTRACTION ----------
         updated_files = None
         if isinstance(fix_result, dict):
             updated_files = fix_result.get("files")
 
-        # ---------- FALLBACK ----------
         if not isinstance(updated_files, list) or not updated_files:
             updated_files = files
 
-        # ---------- NORMALIZE ----------
         normalized_files = normalize_files(updated_files)
 
         if not normalized_files:
             normalized_files = files
 
-        # ---------- 🔥 GUARANTEED WRITE ----------
         send_step("write_attempt", {"file_count": len(normalized_files)})
 
         write_result = write_files(normalized_files)
 
         send_step("write_result", write_result)
 
-        # ---------- STATE UPDATE ----------
         files = normalized_files
 
     send_step("failed")
