@@ -51,18 +51,15 @@ def normalize_files(files):
 
     if isinstance(files, list):
         for f in files:
-            try:
-                if isinstance(f, dict):
-                    filename = f.get("filename")
-                    content = f.get("content")
+            if isinstance(f, dict):
+                filename = f.get("filename")
+                content = f.get("content")
 
-                    if isinstance(filename, str) and filename.strip() and isinstance(content, str):
-                        normalized.append({
-                            "filename": filename.strip(),
-                            "content": content
-                        })
-            except Exception as e:
-                print(f"SENDING: {{'step': 'normalize_error', 'message': '{str(e)}'}}")
+                if isinstance(filename, str) and filename.strip() and isinstance(content, str):
+                    normalized.append({
+                        "filename": filename.strip(),
+                        "content": content
+                    })
 
     return normalized
 
@@ -75,123 +72,98 @@ def run_workflow(requirement):
         metadata={"system": "agentic-ai-dev"}
     )
 
-    logs = []
-
     send_step("start")
 
-    try:
-        # =========================
-        # PLAN
-        # =========================
-        plan = create_plan(requirement, trace=trace)
-        send_step("plan_created")
+    # =========================
+    # PLAN
+    # =========================
+    plan = create_plan(requirement, trace=trace)
+    send_step("plan_created")
 
-        # =========================
-        # CODE GENERATION
-        # =========================
-        result = generate_code(plan)
+    # =========================
+    # CODE GENERATION
+    # =========================
+    result = generate_code(plan)
 
-        files = extract_files_recursively(result.get("files", []))
+    files = extract_files_recursively(result.get("files", []))
 
-        if not files:
-            raise ValueError("Code generation failed")
+    if not files:
+        send_step("error", {"message": "Code generation failed"})
+        return
 
-        send_step("code_generated", {"files": [f["filename"] for f in files]})
+    send_step("code_generated", {"files": [f["filename"] for f in files]})
 
-        # =========================
-        # INITIAL WRITE
-        # =========================
-        clean_generated_folder()
+    # =========================
+    # INITIAL WRITE
+    # =========================
+    clean_generated_folder()
 
-        send_log(logs, "🔥 INITIAL WRITE")
-        write_result = write_files(files)
-        send_log(logs, f"WRITE RESULT → {write_result}")
+    write_files(files)
+    generate_cmake(files)
 
-        generate_cmake(files)
+    # =========================
+    # RETRY LOOP
+    # =========================
+    MAX_RETRIES = 5
 
-        # =========================
-        # RETRY LOOP
-        # =========================
-        MAX_RETRIES = 5
+    for attempt in range(MAX_RETRIES):
 
-        for attempt in range(MAX_RETRIES):
+        send_step("build_attempt", {"attempt": attempt})
 
-            send_step("build_attempt", {"attempt": attempt})
+        output = build_and_test()
 
-            try:
-                output = build_and_test()
+        parsed = parse_ctest_output(output) or {"failed": 1}
+        confidence = compute_confidence(parsed) or {"status": "retry"}
 
-                parsed = parse_ctest_output(output) or {"failed": 1}
-                confidence = compute_confidence(parsed) or {"status": "retry"}
+        send_step("test_result", {
+            "parsed": parsed,
+            "confidence": confidence
+        })
 
-                send_step("test_result", {
-                    "parsed": parsed,
-                    "confidence": confidence
-                })
+        if confidence.get("status") == "success":
+            send_step("success")
+            return
 
-                if confidence.get("status") == "success":
-                    send_step("success")
-                    return
+        send_step("debug_start")
 
-                send_log(logs, "🔧 Debugging...")
+        # =====================================================
+        # 🔥 CRITICAL FIX: DEBUG + WRITE ATOMIC BLOCK
+        # =====================================================
 
-            except Exception as e:
-                send_log(logs, f"🚨 Build/Test failed: {str(e)}")
-                parsed = {"summary": str(e)}
+        fix_result = None
 
-            # =========================
-            # DEBUG (SAFE)
-            # =========================
-            try:
-                fix_result = fix_code(
-                    parsed.get("summary"),
-                    files,
-                    trace=trace
-                )
+        try:
+            fix_result = fix_code(
+                parsed.get("summary"),
+                files,
+                trace=trace
+            )
+        except Exception as e:
+            send_step("debug_error", {"message": str(e)})
 
-                updated_files = None
+        # ---------- FORCE FILE EXTRACTION ----------
+        updated_files = None
+        if isinstance(fix_result, dict):
+            updated_files = fix_result.get("files")
 
-                if isinstance(fix_result, dict):
-                    updated_files = fix_result.get("files")
+        # ---------- FALLBACK ----------
+        if not isinstance(updated_files, list) or not updated_files:
+            updated_files = files
 
-                send_log(logs, f"DEBUG RAW TYPE: {type(updated_files)}")
+        # ---------- NORMALIZE ----------
+        normalized_files = normalize_files(updated_files)
 
-            except Exception as e:
-                send_log(logs, f"🚨 Debug failed: {str(e)}")
-                updated_files = files
+        if not normalized_files:
+            normalized_files = files
 
-            # =========================
-            # FORCE VALID DATA
-            # =========================
-            if not isinstance(updated_files, list) or not updated_files:
-                send_log(logs, "⚠️ Using previous files (fallback)")
-                updated_files = files
+        # ---------- 🔥 GUARANTEED WRITE ----------
+        send_step("write_attempt", {"file_count": len(normalized_files)})
 
-            # =========================
-            # NORMALIZE (SAFE)
-            # =========================
-            normalized_files = normalize_files(updated_files)
+        write_result = write_files(normalized_files)
 
-            if not normalized_files:
-                send_log(logs, "⚠️ Normalization failed → fallback")
-                normalized_files = files
+        send_step("write_result", write_result)
 
-            # =========================
-            # 🔥 GUARANTEED WRITE (OUTSIDE DEBUG TRY)
-            # =========================
-            send_log(logs, f"🔥 FORCED WRITE {len(normalized_files)} FILES")
+        # ---------- STATE UPDATE ----------
+        files = normalized_files
 
-            try:
-                write_result = write_files(normalized_files)
-                send_log(logs, f"🔥 WRITE RESULT → {write_result}")
-            except Exception as e:
-                send_log(logs, f"🚨 Write failed: {str(e)}")
-
-            # ALWAYS update state
-            files = normalized_files
-
-        send_step("failed")
-
-    except Exception as e:
-        send_step("error", {"message": str(e)})
-        raise
+    send_step("failed")
