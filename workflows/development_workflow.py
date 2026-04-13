@@ -47,7 +47,6 @@ def clean_generated_folder():
             pass
 
 
-# 🔥 NEW: CLEAN BUILD FOLDER (CRITICAL FIX)
 def clean_build_folder():
     build_dir = "autodev_build"
 
@@ -59,20 +58,27 @@ def clean_build_folder():
             print(f"SENDING: {{'step': 'build_clean_failed', 'error': '{str(e)}'}}")
 
 
+# 🔥 FIXED NORMALIZE (handles dict also)
 def normalize_files(files):
+
+    if isinstance(files, dict):
+        files = [files]
+
+    if not isinstance(files, list):
+        return []
+
     normalized = []
 
-    if isinstance(files, list):
-        for f in files:
-            if isinstance(f, dict):
-                filename = f.get("filename")
-                content = f.get("content")
+    for f in files:
+        if isinstance(f, dict):
+            filename = f.get("filename")
+            content = f.get("content")
 
-                if isinstance(filename, str) and filename.strip() and isinstance(content, str):
-                    normalized.append({
-                        "filename": filename.strip(),
-                        "content": content
-                    })
+            if isinstance(filename, str) and filename.strip() and isinstance(content, str):
+                normalized.append({
+                    "filename": filename.strip(),
+                    "content": content
+                })
 
     return normalized
 
@@ -111,7 +117,9 @@ def run_workflow(requirement):
     # =========================
     clean_generated_folder()
 
+    send_step("initial_write")
     write_files(files)
+
     generate_cmake(files)
 
     # =========================
@@ -123,13 +131,9 @@ def run_workflow(requirement):
 
         send_step("build_attempt", {"attempt": attempt})
 
-        # 🔥 CRITICAL: CLEAN BUILD EACH TIME
         clean_build_folder()
-
-        # 🔥 REGENERATE CMAKE (ensures file sync)
         generate_cmake(files)
 
-        # 🔥 BUILD + TEST
         output = build_and_test()
 
         parsed = parse_ctest_output(output) or {"failed": 1}
@@ -147,7 +151,7 @@ def run_workflow(requirement):
         send_step("debug_start")
 
         # =========================
-        # DEBUG + WRITE
+        # DEBUG
         # =========================
         fix_result = None
 
@@ -160,24 +164,54 @@ def run_workflow(requirement):
         except Exception as e:
             send_step("debug_error", {"message": str(e)})
 
+        # 🔥 LOG RAW DEBUG OUTPUT TYPE
+        send_step("debug_result_type", {
+            "type": str(type(fix_result))
+        })
+
         updated_files = None
+
         if isinstance(fix_result, dict):
             updated_files = fix_result.get("files")
 
-        if not isinstance(updated_files, list) or not updated_files:
+        # 🔥 LOG BEFORE VALIDATION
+        send_step("debug_files_raw", {
+            "is_list": isinstance(updated_files, list),
+            "length": len(updated_files) if isinstance(updated_files, list) else "invalid"
+        })
+
+        # 🔥 FALLBACK WITH VISIBILITY
+        if not isinstance(updated_files, list) or len(updated_files) == 0:
+            send_step("debug_fallback_to_previous_files")
             updated_files = files
 
+        # =========================
+        # NORMALIZE
+        # =========================
         normalized_files = normalize_files(updated_files)
 
+        send_step("normalized_files", {
+            "count": len(normalized_files)
+        })
+
         if not normalized_files:
+            send_step("normalization_failed_fallback")
             normalized_files = files
 
-        send_step("write_attempt", {"file_count": len(normalized_files)})
+        # =========================
+        # WRITE
+        # =========================
+        send_step("write_attempt", {
+            "file_count": len(normalized_files)
+        })
 
         write_result = write_files(normalized_files)
 
         send_step("write_result", write_result)
 
+        # =========================
+        # STATE UPDATE
+        # =========================
         files = normalized_files
 
     send_step("failed")
