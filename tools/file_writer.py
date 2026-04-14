@@ -12,8 +12,12 @@ def write_files(files):
     print(f"SENDING: {{'step': 'write_input_type', 'type': '{type(files)}'}}")
 
     if isinstance(files, dict):
-        print("SENDING: {'step': 'write_input_dict_wrapped'}")
-        files = [files]
+        if "files" in files:
+            print("SENDING: {'step': 'write_input_dict_unwrapped'}")
+            files = files["files"]
+        else:
+            print("SENDING: {'step': 'write_input_dict_wrapped'}")
+            files = [files]
 
     if not isinstance(files, list):
         print("SENDING: {'step': 'write_invalid_input_type'}")
