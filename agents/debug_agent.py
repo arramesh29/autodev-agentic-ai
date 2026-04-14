@@ -162,6 +162,18 @@ def fix_code(error_log, files, trace=None, parent_span=None):
 
         fixed = _force_syntax_fix(files)
 
+        if not _files_changed(files, fixed):
+            print("SENDING: {'step': 'syntax_fix_no_change_forced'}")
+        
+            forced = []
+            for f in files:
+                forced.append({
+                    "filename": f["filename"],
+                    "content": f["content"] + "\n// syntax retry\n"
+                })
+        
+            return {"files": forced}
+        
         return {
             "files": fixed,
             "debug_summary": {
