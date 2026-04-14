@@ -143,93 +143,105 @@ def run_workflow(requirement):
     # =========================
     # RETRY LOOP
     # =========================
+
     MAX_RETRIES = 3
-
+    
+    
+    def normalize_files(files):
+    
+        # 🔥 FIX: unwrap dict properly
+        if isinstance(files, dict):
+            if "files" in files:
+                files = files["files"]
+            else:
+                files = [files]
+    
+        if not isinstance(files, list):
+            print("SENDING: {'step': 'normalize_invalid_input'}")
+            return []
+    
+        normalized = []
+    
+        for idx, f in enumerate(files):
+    
+            if not isinstance(f, dict):
+                print(f"SENDING: {{'step': 'normalize_invalid_item', 'index': {idx}}}")
+                continue
+    
+            filename = f.get("filename")
+            content = f.get("content")
+    
+            if not isinstance(filename, str) or not filename.strip():
+                print(f"SENDING: {{'step': 'normalize_invalid_filename', 'index': {idx}}}")
+                continue
+    
+            if not isinstance(content, str):
+                print(f"SENDING: {{'step': 'normalize_invalid_content', 'file': '{filename}'}}")
+                continue
+    
+            normalized.append({
+                "filename": filename.strip(),
+                "content": content
+            })
+    
+        print(f"SENDING: {{'step': 'normalize_success', 'count': {len(normalized)}}}")
+        return normalized
+    
+    
+    # 🔥 INSIDE run_workflow LOOP — ONLY MODIFY THIS PART
+    
+    last_failure_signature = None
+    
     for attempt in range(MAX_RETRIES):
-
-        print(f"🔥 WORKFLOW LOOP attempt={attempt}")
-
+    
         send_step("build_attempt", {
             "attempt": attempt,
-            "source": "workflow",
-            "execution_id": trace.id if trace else "no-trace"
+            "source": "workflow"
         })
-
+    
         clean_build_folder()
         generate_cmake(files)
-
+    
         output = build_and_test()
-
+    
         parsed = parse_ctest_output(output) or {"failed": 1}
-        confidence = compute_confidence(parsed) or {"status": "retry"}
-
-        send_step("test_result", {
-            "parsed": parsed,
-            "confidence": confidence
-        })
-
-        if confidence.get("status") == "success":
+    
+        send_step("test_result", {"parsed": parsed})
+    
+        if parsed.get("failed", 1) == 0:
             send_step("success")
             return
-
-        send_step("debug_start")
-        send_step("debug_llm_call_start")
-
+    
+        # 🔥 NEW: stagnation detection
+        signature = str(parsed.get("failure_details"))
+    
+        if signature == last_failure_signature:
+            send_step("stagnation_detected")
+            break
+    
+        last_failure_signature = signature
+    
         # =========================
         # DEBUG
         # =========================
-        fix_result = None
-
-        try:
-            fix_result = fix_code(
-                parsed.get("summary"),
-                files,
-                trace=trace
-            )
-        except Exception as e:
-            send_step("debug_error", {"message": str(e)})
-
-        send_step("debug_llm_call_end")
-
-        # =========================
-        # 🔥 FINAL SAFE EXTRACTION
-        # =========================
-        updated_files = None
-
-        if isinstance(fix_result, dict):
-            candidate = fix_result.get("files")
-
-            if isinstance(candidate, list):
-                updated_files = candidate
-            else:
-                print("SENDING: {'step': 'workflow_invalid_fix_result_structure'}")
-
-        if not isinstance(updated_files, list) or not updated_files:
-            print("SENDING: {'step': 'workflow_fallback_to_previous_files'}")
-            updated_files = files
-
-        # =========================
-        # NORMALIZE
-        # =========================
-        normalized_files = normalize_files(updated_files)
-
-        if not normalized_files:
-            print("SENDING: {'step': 'workflow_empty_after_normalization'}")
-            normalized_files = files
-
-        print(f"SENDING: {{'step': 'workflow_files_ready_for_write', 'count': {len(normalized_files)}}}")
-
+        fix_result = fix_code(parsed.get("summary"), files)
+    
+        # 🔥 CRITICAL FIX
+        updated_files = normalize_files(fix_result)
+    
+        if not updated_files:
+            send_step("debug_invalid_output_fallback")
+            break
+    
+        send_step("debug_valid_output", {"count": len(updated_files)})
+    
         # =========================
         # WRITE
         # =========================
-        send_step("write_attempt", {
-            "file_count": len(normalized_files)
-        })
-
-        write_result = write_files(normalized_files)
-
+        write_result = write_files(updated_files)
+    
         send_step("write_result", write_result)
-
-        files = normalized_files
-
+    
+        files = updated_files
+    
     send_step("failed")
