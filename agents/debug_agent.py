@@ -168,6 +168,8 @@ FILES:
 CRITICAL:
 - You MUST fix the issue
 - You MUST change logic (no same code)
+- You have to also suspect test case if after repeated fix of the code the test case is failing
+- Use the software requirements from the initial code and test generation for cross check of the changes you make
 - Handle boundary + edge cases
 - Return ALL files
 - Ensure valid compilable C++
@@ -189,13 +191,13 @@ STRICT JSON FORMAT:
 
     try:
         print("SENDING: {'step': 'debug_prompt'}")
-        print(prompt[:1000])
+        print(prompt[:10000])
 
         response = llm.invoke(prompt)
         text = (response.content or "").strip()
 
         print("SENDING: {'step': 'debug_raw_response'}")
-        print(text[:1000])
+        print(text[:10000])
 
         if not text:
             print("SENDING: {'step': 'debug_empty_response'}")
