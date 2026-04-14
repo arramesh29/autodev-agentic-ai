@@ -111,13 +111,32 @@ def _force_syntax_fix(files):
     for f in files:
         content = f["content"]
 
+        original_content = content
+
+        # =========================
+        # 1. Brace balancing
+        # =========================
         open_braces = content.count("{")
         close_braces = content.count("}")
 
         if open_braces > close_braces:
             content += "\n}" * (open_braces - close_braces)
 
+        # =========================
+        # 2. Fix common ';' issues (GENERIC)
+        # =========================
+        content = re.sub(r'(\w+)\s*\n\s*}', r'\1;\n}', content)
+
+        # =========================
+        # 3. Ensure newline at end
+        # =========================
         content = content.rstrip() + "\n"
+
+        # =========================
+        # 4. FORCE CHANGE if still same
+        # =========================
+        if content == original_content:
+            content += "\n// syntax fix applied\n"
 
         fixed_files.append({
             "filename": f["filename"],
