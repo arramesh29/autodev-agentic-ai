@@ -55,6 +55,43 @@ def _files_changed(old_files, new_files):
     return False
 
 
+# =========================
+# 🔥 NEW: ERROR CLASSIFIER
+# =========================
+def _classify_error(error_log):
+    if not isinstance(error_log, str):
+        return "unknown"
+
+    log = error_log.lower()
+
+    if any(x in log for x in [
+        "syntax error",
+        "missing ';'",
+        "expected ';'",
+        "error c2059",
+        "error c2143"
+    ]):
+        return "syntax"
+
+    if any(x in log for x in [
+        "unresolved external",
+        "lnk",
+        "undefined reference",
+        "cannot open source file"
+    ]):
+        return "build"
+
+    if any(x in log for x in [
+        "failed",
+        "expected",
+        "actual",
+        "assert"
+    ]):
+        return "logic"
+
+    return "unknown"
+
+
 def _extract_json(text):
 
     text = text.replace("```json", "").replace("```", "").strip()
@@ -90,18 +127,7 @@ def _extract_json(text):
 
 
 def _is_syntax_error(error_log):
-    if not isinstance(error_log, str):
-        return False
-
-    error_log = error_log.lower()
-
-    return any(x in error_log for x in [
-        "syntax error",
-        "missing ';'",
-        "expected ';'",
-        "error c2059",
-        "error c2143"
-    ])
+    return _classify_error(error_log) == "syntax"   # 🔥 UPDATED
 
 
 def _force_syntax_fix(files):
@@ -123,17 +149,20 @@ def _force_syntax_fix(files):
             content += "\n}" * (open_braces - close_braces)
 
         # =========================
-        # 2. Fix common ';' issues (GENERIC)
+        # 2. Fix common ';' issues
         # =========================
         content = re.sub(r'(\w+)\s*\n\s*}', r'\1;\n}', content)
 
+        # 🔥 NEW: fix stray closing braces
+        content = re.sub(r';?\s*}', r';\n}', content)
+
         # =========================
-        # 3. Ensure newline at end
+        # 3. Ensure newline
         # =========================
         content = content.rstrip() + "\n"
 
         # =========================
-        # 4. FORCE CHANGE if still same
+        # 4. FORCE CHANGE
         # =========================
         if content == original_content:
             content += "\n// syntax fix applied\n"
@@ -148,46 +177,12 @@ def _force_syntax_fix(files):
     return fixed_files
 
 
-def fix_code(error_log, files, trace=None, parent_span=None):
+# =========================
+# 🔥 NEW: PROMPT BUILDER
+# =========================
+def _build_prompt(error_type, error_log, files):
 
-    print("SENDING: {'step': 'debug_start'}")
-
-    files = _normalize_files(files)
-
-    # =========================
-    # SYNTAX FIX
-    # =========================
-    if _is_syntax_error(error_log):
-        print("SENDING: {'step': 'syntax_error_detected'}")
-
-        fixed = _force_syntax_fix(files)
-
-        if not _files_changed(files, fixed):
-            print("SENDING: {'step': 'syntax_fix_no_change_forced'}")
-        
-            forced = []
-            for f in files:
-                forced.append({
-                    "filename": f["filename"],
-                    "content": f["content"] + "\n// syntax retry\n"
-                })
-        
-            return {"files": forced}
-        
-        return {
-            "files": fixed,
-            "debug_summary": {
-                "root_cause": "Syntax error",
-                "fix": "Auto brace correction"
-            },
-            "llm_prompt": None,
-            "llm_response": None
-        }
-
-    # =========================
-    # LLM CALL
-    # =========================
-    prompt = f"""
+    base = f"""
 You are a senior automotive C++ engineer.
 
 ERROR:
@@ -199,26 +194,92 @@ FILES:
 CRITICAL:
 - You MUST fix the issue
 - You MUST change logic (no same code)
-- You have to also suspect test case if after repeated fix of the code the test case is failing
-- Use the software requirements from the initial code and test generation for cross check of the changes you make
 - Handle boundary + edge cases
 - Return ALL files
 - Ensure valid compilable C++
+"""
+
+    if error_type == "build":
+        base += """
+FOCUS:
+- Fix compilation errors
+- Resolve missing includes, symbols, or definitions
+- Ensure all functions are defined and linked
+"""
+
+    elif error_type == "logic":
+        base += """
+FOCUS:
+- Fix incorrect logic
+- Fix incorrect tests if the logic in code is fine
+- Ensure tests pass
+- Validate expected vs actual outputs
+"""
+
+    base += """
 
 STRICT JSON FORMAT:
 
-{{
+{
   "files":[
-    {{"filename":"aeb_controller.h","content":"..."}},
-    {{"filename":"aeb_controller.cpp","content":"..."}},
-    {{"filename":"test_aeb_controller.cpp","content":"..."}}
+    {"filename":"aeb_controller.h","content":"..."},
+    {"filename":"aeb_controller.cpp","content":"..."},
+    {"filename":"test_aeb_controller.cpp","content":"..."}
   ],
-  "debug_summary": {{
+  "debug_summary": {
     "root_cause": "...",
     "fix": "..."
-  }}
-}}
+  }
+}
 """
+
+    return base
+
+
+def fix_code(error_log, files, trace=None, parent_span=None):
+
+    print("SENDING: {'step': 'debug_start'}")
+
+    files = _normalize_files(files)
+
+    # 🔥 NEW: classify error
+    error_type = _classify_error(error_log)
+    print(f"SENDING: {{'step': 'error_classified', 'type': '{error_type}'}}")
+
+    # =========================
+    # SYNTAX FIX
+    # =========================
+    if error_type == "syntax":
+        print("SENDING: {'step': 'syntax_error_detected'}")
+
+        fixed = _force_syntax_fix(files)
+
+        if not _files_changed(files, fixed):
+            print("SENDING: {'step': 'syntax_fix_no_change_forced'}")
+
+            forced = []
+            for f in files:
+                forced.append({
+                    "filename": f["filename"],
+                    "content": f["content"] + "\n// syntax retry\n"
+                })
+
+            return {"files": forced}
+
+        return {
+            "files": fixed,
+            "debug_summary": {
+                "root_cause": "Syntax error",
+                "fix": "Auto correction"
+            },
+            "llm_prompt": None,
+            "llm_response": None
+        }
+
+    # =========================
+    # 🔥 UPDATED: LLM CALL via strategy
+    # =========================
+    prompt = _build_prompt(error_type, error_log, files)
 
     try:
         print("SENDING: {'step': 'debug_prompt'}")
