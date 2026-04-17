@@ -56,7 +56,7 @@ def _files_changed(old_files, new_files):
 
 
 # =========================
-# 🔥 NEW: ERROR CLASSIFIER
+# ERROR CLASSIFIER
 # =========================
 def _classify_error(error_log):
     if not isinstance(error_log, str):
@@ -127,45 +127,44 @@ def _extract_json(text):
 
 
 def _is_syntax_error(error_log):
-    return _classify_error(error_log) == "syntax"   # 🔥 UPDATED
+    return _classify_error(error_log) == "syntax"
 
 
+# =========================
+# 🔥 UPDATED: SAFE SYNTAX FIX
+# =========================
 def _force_syntax_fix(files):
 
     fixed_files = []
 
     for f in files:
         content = f["content"]
-
         original_content = content
 
-        # =========================
-        # 1. Brace balancing
-        # =========================
+        # 1. Safe brace balancing
         open_braces = content.count("{")
         close_braces = content.count("}")
 
         if open_braces > close_braces:
             content += "\n}" * (open_braces - close_braces)
 
-        # =========================
-        # 2. Fix common ';' issues
-        # =========================
-        content = re.sub(r'(\w+)\s*\n\s*}', r'\1;\n}', content)
+        # 2. Limited semicolon fix (SAFE)
+        content = re.sub(
+            r'([a-zA-Z0-9_])\s*\n\s*}',
+            r'\1;\n}',
+            content
+        )
 
-        # 🔥 NEW: fix stray closing braces
-        content = re.sub(r';?\s*}', r';\n}', content)
+        # ❌ REMOVED dangerous global replacement
+        # content = re.sub(r';?\s*}', r';\n}', content)
 
-        # =========================
         # 3. Ensure newline
-        # =========================
         content = content.rstrip() + "\n"
 
-        # =========================
-        # 4. FORCE CHANGE
-        # =========================
+        # 4. If no real change → signal failure
         if content == original_content:
-            content += "\n// syntax fix applied\n"
+            print("SENDING: {'step': 'syntax_fix_no_safe_change'}")
+            return None   # 🔥 IMPORTANT
 
         fixed_files.append({
             "filename": f["filename"],
@@ -178,7 +177,7 @@ def _force_syntax_fix(files):
 
 
 # =========================
-# 🔥 NEW: PROMPT BUILDER
+# PROMPT BUILDER
 # =========================
 def _build_prompt(error_type, error_log, files):
 
@@ -197,6 +196,9 @@ CRITICAL:
 - Handle boundary + edge cases
 - Return ALL files
 - Ensure valid compilable C++
+- Do NOT introduce new syntax errors   # 🔥 NEW
+- If multiple syntax errors exist, fix structure carefully  # 🔥 NEW
+- Prefer fixing declarations and structure over random edits  # 🔥 NEW
 """
 
     if error_type == "build":
@@ -235,48 +237,48 @@ STRICT JSON FORMAT:
     return base
 
 
+# =========================
+# MAIN DEBUG FUNCTION
+# =========================
 def fix_code(error_log, files, trace=None, parent_span=None):
 
     print("SENDING: {'step': 'debug_start'}")
 
     files = _normalize_files(files)
 
-    # 🔥 NEW: classify error
     error_type = _classify_error(error_log)
     print(f"SENDING: {{'step': 'error_classified', 'type': '{error_type}'}}")
 
     # =========================
-    # SYNTAX FIX
+    # 🔥 UPDATED SYNTAX HANDLING
     # =========================
     if error_type == "syntax":
         print("SENDING: {'step': 'syntax_error_detected'}")
 
         fixed = _force_syntax_fix(files)
 
-        if not _files_changed(files, fixed):
-            print("SENDING: {'step': 'syntax_fix_no_change_forced'}")
+        # 🔥 fallback to LLM if unsafe
+        if fixed is None:
+            print("SENDING: {'step': 'syntax_fix_failed_fallback_llm'}")
+            error_type = "build"
 
-            forced = []
-            for f in files:
-                forced.append({
-                    "filename": f["filename"],
-                    "content": f["content"] + "\n// syntax retry\n"
-                })
+        elif not _files_changed(files, fixed):
+            print("SENDING: {'step': 'syntax_fix_no_change'}")
+            error_type = "build"
 
-            return {"files": forced}
-
-        return {
-            "files": fixed,
-            "debug_summary": {
-                "root_cause": "Syntax error",
-                "fix": "Auto correction"
-            },
-            "llm_prompt": None,
-            "llm_response": None
-        }
+        else:
+            return {
+                "files": fixed,
+                "debug_summary": {
+                    "root_cause": "Syntax error",
+                    "fix": "Safe auto correction"
+                },
+                "llm_prompt": None,
+                "llm_response": None
+            }
 
     # =========================
-    # 🔥 UPDATED: LLM CALL via strategy
+    # LLM CALL
     # =========================
     prompt = _build_prompt(error_type, error_log, files)
 
