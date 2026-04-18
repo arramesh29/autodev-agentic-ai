@@ -92,6 +92,38 @@ def _classify_error(error_log):
     return "unknown"
 
 
+# =========================
+# 🔥 NEW: LINE NUMBER EXTRACTION
+# =========================
+def _extract_error_location(error_log):
+
+    if not isinstance(error_log, str):
+        return None
+
+    # MSVC style: file.cpp(247)
+    msvc = re.findall(r'([a-zA-Z0-9_./\\]+)\((\d+)\)', error_log)
+
+    # GCC/Clang style: file.cpp:247
+    gcc = re.findall(r'([a-zA-Z0-9_./\\]+):(\d+)', error_log)
+
+    locations = []
+
+    for f, l in msvc + gcc:
+        try:
+            locations.append({
+                "file": f.split("\\")[-1].split("/")[-1],
+                "line": int(l)
+            })
+        except:
+            continue
+
+    if locations:
+        print(f"SENDING: {{'step': 'error_locations_detected', 'count': {len(locations)}}}")
+        return locations[:3]  # limit noise
+
+    return None
+
+
 def _extract_json(text):
 
     text = text.replace("```json", "").replace("```", "").strip()
@@ -177,9 +209,9 @@ def _force_syntax_fix(files):
 
 
 # =========================
-# PROMPT BUILDER
+# 🔥 UPDATED: PROMPT BUILDER (LINE-AWARE)
 # =========================
-def _build_prompt(error_type, error_log, files):
+def _build_prompt(error_type, error_log, files, error_locations=None):
 
     base = f"""
 You are a senior automotive C++ engineer.
@@ -189,22 +221,39 @@ ERROR:
 
 FILES:
 {files}
+"""
 
+    # 🔥 NEW: inject line-aware hint
+    if error_locations:
+        base += "\nERROR LOCATIONS:\n"
+        for loc in error_locations:
+            base += f"- File: {loc['file']}, Line: {loc['line']}\n"
+
+        base += """
+FOCUS ON THESE LOCATIONS FIRST.
+Do not blindly modify entire file.
+"""
+
+    base += """
 CRITICAL:
 - You MUST fix the issue
+- Fix the issue with MINIMAL changes
+- Do NOT rewrite entire files unnecessarily
+- Preserve working logic
 - You MUST change logic (no same code)
 - Handle boundary + edge cases
 - Return ALL files
 - Ensure valid compilable C++
-- Do NOT introduce new syntax errors   # 🔥 NEW
-- If multiple syntax errors exist, fix structure carefully  # 🔥 NEW
-- Prefer fixing declarations and structure over random edits  # 🔥 NEW
+- Do NOT introduce new syntax errors
+- If multiple syntax errors exist, fix structure carefully
+- Prefer fixing declarations and structure over random edits
 """
 
     if error_type == "build":
         base += """
 FOCUS:
-- Fix compilation errors
+- Fix compilation errors at indicated lines
+- Correct declarations, types, missing includes
 - Resolve missing includes, symbols, or definitions
 - Ensure all functions are defined and linked
 """
@@ -215,6 +264,8 @@ FOCUS:
 - Fix incorrect logic
 - Ensure tests pass
 - Validate expected vs actual outputs
+- Compare expected vs actual
+- Fix either code OR test (not both blindly)
 """
 
     base += """
@@ -249,6 +300,8 @@ def fix_code(error_log, files, trace=None, parent_span=None):
     error_type = _classify_error(error_log)
     print(f"SENDING: {{'step': 'error_classified', 'type': '{error_type}'}}")
 
+    # 🔥 NEW
+    error_locations = _extract_error_location(error_log)
     # =========================
     # 🔥 UPDATED SYNTAX HANDLING
     # =========================
@@ -280,7 +333,7 @@ def fix_code(error_log, files, trace=None, parent_span=None):
     # =========================
     # LLM CALL
     # =========================
-    prompt = _build_prompt(error_type, error_log, files)
+    prompt = _build_prompt(error_type, error_log, files, error_locations)
 
     try:
         print("SENDING: {'step': 'debug_prompt'}")
