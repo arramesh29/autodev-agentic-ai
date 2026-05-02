@@ -51,116 +51,119 @@ def stream_workflow(query: str):
     def event_stream():
         import time
         import json
-
+    
         def send(data):
             print("SENDING:", data)
             return f"data: {json.dumps(data)}\n\n"
-
+    
         try:
             # 🚀 START
             yield send({"step": "start"})
             time.sleep(0.1)
-
-        # 🧠 REQUIREMENTS ANALYSIS
-        analysis = analyze_requirements(query)
-        yield send({
-            "step": "requirements_analyzed",
-            "data": analysis
-        })
-        time.sleep(0.1)
-        
-        # ✅ VALIDATION
-        validated = validate_requirements(analysis)
-        
-        requirements = validated.get("requirements", [])
-        conflicts = validated.get("conflicts", [])
-        ambiguities = validated.get("ambiguities", [])
-        
-        # ❌ BLOCK if conflicts
-        if conflicts:
+    
+            # 🧠 REQUIREMENTS ANALYSIS
+            analysis = analyze_requirements(query)
             yield send({
-                "step": "error",
-                "type": "conflict",
-                "details": conflicts
+                "step": "requirements_analyzed",
+                "data": analysis
             })
-            return
-        
-        # ⚠️ ASK USER if ambiguous
-        if ambiguities:
+            time.sleep(0.1)
+    
+            # ✅ VALIDATION
+            validated = validate_requirements(analysis)
+    
+            requirements = validated.get("requirements", [])
+            conflicts = validated.get("conflicts", [])
+            ambiguities = validated.get("ambiguities", [])
+    
+            # ❌ BLOCK if conflicts
+            if conflicts:
+                yield send({
+                    "step": "error",
+                    "type": "conflict",
+                    "details": conflicts
+                })
+                return
+    
+            # ⚠️ ASK USER if ambiguous
+            if ambiguities:
+                yield send({
+                    "step": "clarification_needed",
+                    "details": ambiguities
+                })
+                return
+    
+            # ❌ NO VALID REQUIREMENTS
+            if not requirements:
+                yield send({
+                    "step": "error",
+                    "message": "No valid requirements extracted"
+                })
+                return
+    
+            # 📋 PLAN
+            plan = create_plan(requirements)
+    
             yield send({
-                "step": "clarification_needed",
-                "details": ambiguities
+                "step": "plan_created",
+                "requirements_count": len(requirements)
             })
-            return
-
-        if not requirements:
-            yield send({
-                "step": "error",
-                "message": "No valid requirements extracted"
-            })
-            return
-        
-        # 📋 PLAN (NOW USING CLEAN INPUT)
-        plan = create_plan(requirements)
-        
-        yield send({
-            "step": "plan_created",
-            "requirements_count": len(requirements)
-        })
-        time.sleep(0.1)
-
-            # 🧠 CODE GENERATION
-            generate_code(plan, requirements=requirements)
+            time.sleep(0.1)
+    
+            # 🧠 CODE GENERATION (FIXED)
+            result = generate_code(plan, requirements=requirements)
             files = result.get("files", [])
-
+    
             yield send({
                 "step": "code_generated",
                 "files": [f["filename"] for f in files]
             })
             time.sleep(0.1)
-
+    
             # 💾 WRITE FILES
             write_files(files)
             generate_cmake(files)
-
+    
             MAX_RETRIES = 5
-
+    
             for attempt in range(MAX_RETRIES):
-
+    
                 yield send({
                     "step": "build_attempt",
                     "attempt": attempt
                 })
                 time.sleep(0.1)
-
+    
                 output = build_and_test()
-
+    
                 parsed = parse_ctest_output(output)
                 confidence = compute_confidence(parsed)
-
+    
                 yield send({
                     "step": "test_result",
                     "parsed": parsed,
                     "confidence": confidence
                 })
                 time.sleep(0.1)
-
+    
                 if confidence["status"] == "success":
                     yield send({"step": "done"})
                     return
-
+    
                 # 🔧 DEBUG FIX LOOP
-                files = fix_code(output, files)
+                fix_result = fix_code(output, files)
+                files = fix_result.get("files", files)
+    
                 write_files(files)
-
+    
             yield send({"step": "failed"})
-
+    
         except Exception as e:
             yield send({
                 "step": "error",
                 "message": str(e)
             })
-
+        
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
