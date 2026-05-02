@@ -1,7 +1,10 @@
 from services.llm_service import llm
 
 
-def create_plan(requirement, trace=None, parent_span=None):
+def create_plan(requirements, trace=None, parent_span=None):
+
+    if not requirements:
+        raise ValueError("No requirements provided to planner")
 
     # SAFE span creation
     span = None
@@ -12,49 +15,65 @@ def create_plan(requirement, trace=None, parent_span=None):
             else trace.span(name="create_plan_agent")
         )
 
-    prompt = f"""
-    Break the following automotive requirement into
-    software development tasks:
+    # 🔧 Format structured requirements
+    formatted_requirements = ""
+    for r in requirements:
+        formatted_requirements += f"{r['id']}: {r['description']}\n"
 
-    {requirement}
+    # 🧠 Improved prompt
+    prompt = f"""
+    You are an automotive software architect.
+
+    Convert the following structured requirements into a
+    clear software development plan.
+
+    Requirements:
+    {formatted_requirements}
+
+    Instructions:
+    1. Group requirements into modules
+    2. Define:
+       - functions
+       - interfaces
+       - data flow
+    3. Ensure traceability:
+       - Map each module/function to REQ-ID
+    4. Identify test scenarios per requirement
+
+    Output format:
+
+    Module: <name>
+    - REQ-IDs: [...]
+    - Functions:
+    - Inputs/Outputs:
+    - Test Cases:
     """
 
     generation = None
     output = None
 
     try:
-        # CREATE GENERATION (v4 way)
         if span:
             generation = span.generation(
                 name="llm_create_plan",
                 model="gpt-4o",
                 input=prompt,
-                metadata={
-                    "agent": "planner_agent"
-                }
+                metadata={"agent": "planner_agent"}
             )
 
         response = llm.invoke(prompt)
-
         output = response.content
 
-        # END GENERATION (raw output)
         if generation:
-            generation.end(
-                output=output[:2000]  # truncate for UI safety
-            )
+            generation.end(output=output[:2000])
 
-        # End span with structured output
         if span:
-            span.end(
-                output=output[:1000]
-            )
+            span.end(output=output[:1000])
 
         return output
 
     except Exception as e:
 
-        # Ensure generation is closed even on failure
         if generation:
             generation.end(
                 level="ERROR",
@@ -65,9 +84,6 @@ def create_plan(requirement, trace=None, parent_span=None):
             )
 
         if span:
-            span.end(
-                level="ERROR",
-                status_message=str(e)
-            )
+            span.end(level="ERROR", status_message=str(e))
 
         raise
