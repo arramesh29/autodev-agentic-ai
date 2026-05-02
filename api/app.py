@@ -110,7 +110,7 @@ def stream_workflow(query: str):
         time.sleep(0.1)
 
             # 🧠 CODE GENERATION
-            result = generate_code(plan)
+            generate_code(plan, requirements=requirements)
             files = result.get("files", [])
 
             yield send({
