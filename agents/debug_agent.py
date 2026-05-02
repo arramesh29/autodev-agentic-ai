@@ -3,9 +3,36 @@ import json
 import re
 
 
-def _normalize_files(files):
+# =========================
+# 🔥 NEW: EXTRACT REQ IDs (ADDED)
+# =========================
+def _extract_req_ids(text):
+    if not isinstance(text, str):
+        return []
+    return list(set(re.findall(r"REQ-\d+", text)))
 
-    # 🔥 FIX 1: unwrap {"files": [...]}
+
+# =========================
+# 🔥 NEW: MAP ERROR → REQ (ADDED)
+# =========================
+def _map_error_to_requirements(error_log, files):
+    req_ids = set()
+
+    for f in files:
+        req_ids.update(_extract_req_ids(f.get("content", "")))
+
+    req_ids.update(_extract_req_ids(error_log))
+
+    if req_ids:
+        print(f"SENDING: {{'step': 'req_mapping_detected', 'req_ids': {list(req_ids)}}}")
+
+    return list(req_ids)
+
+
+# =========================
+# EXISTING (UNCHANGED)
+# =========================
+def _normalize_files(files):
     if isinstance(files, dict):
         if "files" in files:
             files = files["files"]
@@ -55,9 +82,6 @@ def _files_changed(old_files, new_files):
     return False
 
 
-# =========================
-# ERROR CLASSIFIER
-# =========================
 def _classify_error(error_log):
     if not isinstance(error_log, str):
         return "unknown"
@@ -65,45 +89,28 @@ def _classify_error(error_log):
     log = error_log.lower()
 
     if any(x in log for x in [
-        "syntax error",
-        "missing ';'",
-        "expected ';'",
-        "error c2059",
-        "error c2143"
+        "syntax error", "missing ';'", "expected ';'", "error c2059", "error c2143"
     ]):
         return "syntax"
 
     if any(x in log for x in [
-        "unresolved external",
-        "lnk",
-        "undefined reference",
-        "cannot open source file"
+        "unresolved external", "lnk", "undefined reference", "cannot open source file"
     ]):
         return "build"
 
     if any(x in log for x in [
-        "failed",
-        "expected",
-        "actual",
-        "assert"
+        "failed", "expected", "actual", "assert"
     ]):
         return "logic"
 
     return "unknown"
 
 
-# =========================
-# 🔥 NEW: LINE NUMBER EXTRACTION
-# =========================
 def _extract_error_location(error_log):
-
     if not isinstance(error_log, str):
         return None
 
-    # MSVC style: file.cpp(247)
     msvc = re.findall(r'([a-zA-Z0-9_./\\]+)\((\d+)\)', error_log)
-
-    # GCC/Clang style: file.cpp:247
     gcc = re.findall(r'([a-zA-Z0-9_./\\]+):(\d+)', error_log)
 
     locations = []
@@ -119,13 +126,12 @@ def _extract_error_location(error_log):
 
     if locations:
         print(f"SENDING: {{'step': 'error_locations_detected', 'count': {len(locations)}}}")
-        return locations[:3]  # limit noise
+        return locations[:3]
 
     return None
 
 
 def _extract_json(text):
-
     text = text.replace("```json", "").replace("```", "").strip()
 
     if text.lower().startswith("json"):
@@ -166,37 +172,29 @@ def _is_syntax_error(error_log):
 # 🔥 UPDATED: SAFE SYNTAX FIX
 # =========================
 def _force_syntax_fix(files):
-
     fixed_files = []
 
     for f in files:
         content = f["content"]
         original_content = content
 
-        # 1. Safe brace balancing
         open_braces = content.count("{")
         close_braces = content.count("}")
 
         if open_braces > close_braces:
             content += "\n}" * (open_braces - close_braces)
 
-        # 2. Limited semicolon fix (SAFE)
         content = re.sub(
             r'([a-zA-Z0-9_])\s*\n\s*}',
             r'\1;\n}',
             content
         )
 
-        # ❌ REMOVED dangerous global replacement
-        # content = re.sub(r';?\s*}', r';\n}', content)
-
-        # 3. Ensure newline
         content = content.rstrip() + "\n"
 
-        # 4. If no real change → signal failure
         if content == original_content:
             print("SENDING: {'step': 'syntax_fix_no_safe_change'}")
-            return None   # 🔥 IMPORTANT
+            return None
 
         fixed_files.append({
             "filename": f["filename"],
@@ -209,9 +207,9 @@ def _force_syntax_fix(files):
 
 
 # =========================
-# 🔥 UPDATED: PROMPT BUILDER (LINE-AWARE)
+# 🔥 UPDATED PROMPT (ONLY EXTENDED)
 # =========================
-def _build_prompt(error_type, error_log, files, error_locations=None):
+def _build_prompt(error_type, error_log, files, error_locations=None, req_ids=None):
 
     base = f"""
 You are a senior automotive C++ engineer.
@@ -223,7 +221,15 @@ FILES:
 {files}
 """
 
-    # 🔥 NEW: inject line-aware hint
+    # 🔥 NEW ADDITION (SAFE)
+    if req_ids:
+        base += f"\nAFFECTED REQUIREMENTS: {req_ids}\n"
+        base += """
+Focus on logic related to these REQ-IDs.
+Ensure requirement correctness is preserved.
+Do not blindly modify entire file.
+"""
+
     if error_locations:
         base += "\nERROR LOCATIONS:\n"
         for loc in error_locations:
@@ -237,13 +243,14 @@ Do not blindly modify entire file.
     base += """
 CRITICAL:
 - You MUST fix the issue
-- Fix the issue with MINIMAL changes
+- Minimal changes
 - Do NOT rewrite entire files unnecessarily
-- Preserve working logic
+- Preserve logic
+- Maintain REQ-ID traceability
 - You MUST change logic (no same code)
 - Handle boundary + edge cases
 - Return ALL files
-- Ensure valid compilable C++
+- Valid compilable C++
 - Do NOT introduce new syntax errors
 - If multiple syntax errors exist, fix structure carefully
 - Prefer fixing declarations and structure over random edits
@@ -269,7 +276,6 @@ FOCUS:
 """
 
     base += """
-
 STRICT JSON FORMAT:
 
 {
@@ -300,10 +306,13 @@ def fix_code(error_log, files, trace=None, parent_span=None):
     error_type = _classify_error(error_log)
     print(f"SENDING: {{'step': 'error_classified', 'type': '{error_type}'}}")
 
-    # 🔥 NEW
     error_locations = _extract_error_location(error_log)
+
+    # 🔥 NEW (SAFE ADDITION)
+    req_ids = _map_error_to_requirements(error_log, files)
+
     # =========================
-    # 🔥 UPDATED SYNTAX HANDLING
+    # SYNTAX FIX (UNCHANGED)
     # =========================
     if error_type == "syntax":
         print("SENDING: {'step': 'syntax_error_detected'}")
@@ -331,9 +340,15 @@ def fix_code(error_log, files, trace=None, parent_span=None):
             }
 
     # =========================
-    # LLM CALL
+    # LLM DEBUG (UNCHANGED FLOW)
     # =========================
-    prompt = _build_prompt(error_type, error_log, files, error_locations)
+    prompt = _build_prompt(
+        error_type,
+        error_log,
+        files,
+        error_locations,
+        req_ids
+    )
 
     try:
         print("SENDING: {'step': 'debug_prompt'}")
