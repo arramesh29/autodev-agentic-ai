@@ -3,9 +3,11 @@ import json
 import re
 
 
-def generate_code(spec, trace=None, parent_span=None):
+def generate_code(plan, requirements=None, trace=None, parent_span=None):
 
+    # =========================
     # SAFE span creation
+    # =========================
     span = None
     if trace:
         span = (
@@ -14,54 +16,81 @@ def generate_code(spec, trace=None, parent_span=None):
             else trace.span(name="generate_code_agent")
         )
 
+    # =========================
+    # 🔧 REQUIREMENT CONTEXT (NEW)
+    # =========================
+    req_context = ""
+
+    if requirements:
+        for r in requirements:
+            req_context += f"{r.get('id', 'REQ-UNK')}: {r.get('description', '')}\n"
+
+    # =========================
+    # 🧠 ENHANCED PROMPT
+    # =========================
     prompt = f"""
 You are an automotive C++ software engineer.
+
 Generate production-grade C++ code and unit tests using GoogleTest.
 
-Requirements:
-- Follow modular design (.h + .cpp)
-- No experimental code
+==============================
+REQUIREMENTS (TRACEABLE)
+==============================
+{req_context if requirements else "No structured requirements provided"}
+
+==============================
+DEVELOPMENT PLAN
+==============================
+{plan}
+
+==============================
+CRITICAL TRACEABILITY RULE
+==============================
+- Every function MUST include REQ-ID in comments
+- Every test MUST reference REQ-ID
+- Maintain mapping:
+    REQ → Function → Test
+
+Example:
+    // REQ-001: TTC calculation
+    float compute_ttc(...)
+
+    TEST(AEB, TTC_REQ001)
+
+==============================
+GENERAL RULES
+==============================
+- Modular design (.h + .cpp)
 - Deterministic logic (no randomness)
-- Automotive safety style (clear logic, no undefined behavior)
+- Automotive safety style
+- No undefined behavior
+- Include ALL necessary headers
+- Code MUST compile
 
-IMPORTANT:
-    - Include all necessary headers
-    - Use standard C++ includes
-    - Ensure code compiles without errors
-    - Avoid missing includes (e.g., <limits>, <cmath>, <vector>)
-
-Unit Test Requirements:
+==============================
+UNIT TEST RULES
+==============================
 - Use GoogleTest
 - Cover:
-  - C0 (statement coverage)
-  - C1 (branch coverage)
-- Include:
   - normal cases
   - boundary conditions
   - failure conditions
   - edge cases
 
-🚨 CRITICAL RULE:
-- You MUST generate ALL 3 files:
+==============================
+🚨 CRITICAL OUTPUT RULES
+==============================
+- MUST generate ALL 3 files:
   1. aeb_controller.h
   2. aeb_controller.cpp
   3. test_aeb_controller.cpp
-- Do NOT skip any file
-- Do NOT return partial output
 
-Return ONLY valid JSON.
+- DO NOT skip any file
+- DO NOT return partial output
 
-STRICT RULES:
-- "files" MUST be a list
-- Each item MUST be an object with:
-    - "filename": string
-    - "content": string
-- DO NOT return raw strings inside "files"
-- DO NOT return empty list
-- DO NOT omit filename or content
-
-Format:
-
+==============================
+STRICT JSON FORMAT
+==============================
 {{
   "files":[
     {{"filename":"aeb_controller.h","content":"header code"}},
@@ -69,16 +98,15 @@ Format:
     {{"filename":"test_aeb_controller.cpp","content":"GoogleTest code"}}
   ]
 }}
-
-Requirement:
-{spec}
 """
 
     generation = None
     text = None
 
     try:
+        # =========================
         # Langfuse generation
+        # =========================
         if span:
             generation = span.generation(
                 name="llm_generate_code",
@@ -103,7 +131,7 @@ Requirement:
 
         json_str = match.group(0)
 
-        # 🔥 small safety cleanup (non-breaking)
+        # Cleanup trailing commas
         json_str = re.sub(r",\s*}", "}", json_str)
         json_str = re.sub(r",\s*]", "]", json_str)
 
@@ -132,7 +160,7 @@ Requirement:
             raise ValueError("No valid files returned from LLM")
 
         # =========================
-        # 🔥 ENFORCE ALL FILES PRESENT (CRITICAL FIX)
+        # 🔥 ENFORCE REQUIRED FILES
         # =========================
         required_files = {
             "aeb_controller.h",
@@ -146,6 +174,16 @@ Requirement:
 
         if missing_files:
             raise ValueError(f"Missing required files from LLM: {missing_files}")
+
+        # =========================
+        # 🔥 TRACEABILITY CHECK (NEW)
+        # =========================
+        if requirements:
+            for f in validated_files:
+                if "REQ-" not in f["content"]:
+                    raise ValueError(
+                        f"Missing REQ-ID traceability in file: {f['filename']}"
+                    )
 
         result["files"] = validated_files
 
