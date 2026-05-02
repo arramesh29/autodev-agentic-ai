@@ -55,13 +55,14 @@ IMPORTANT:
 - No extra text
 """
 
-    response = llm(prompt)
+    response = llm.invoke(prompt)
 
-    # 🔥 SAFE PARSING
+    text = response.content.strip()
+
     try:
-        return json.loads(response)
-    except Exception:
-        print("Invalid JSON from LLM:", response)
+        return json.loads(text)
+    except:
+        print("Invalid JSON:", text)
         return {
             "requirements": [],
             "conflicts": [],
