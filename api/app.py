@@ -8,10 +8,13 @@ import time
 from api.file_api import router as file_router
 
 # 🔧 Import your agents + tools
+from agents.requirements_analysis_agent import analyze_requirements
 from agents.planner_agent import create_plan
 from agents.code_generation_agent import generate_code
 from agents.debug_agent import fix_code
 
+
+from tools.requirements_validator import validate_requirements
 from tools.file_writer import write_files
 from tools.cmake_generator import generate_cmake
 from tools.build_tool import build_and_test
@@ -58,10 +61,53 @@ def stream_workflow(query: str):
             yield send({"step": "start"})
             time.sleep(0.1)
 
-            # 📋 PLAN
-            plan = create_plan(query)
-            yield send({"step": "plan_created"})
-            time.sleep(0.1)
+        # 🧠 REQUIREMENTS ANALYSIS
+        analysis = analyze_requirements(query)
+        yield send({
+            "step": "requirements_analyzed",
+            "data": analysis
+        })
+        time.sleep(0.1)
+        
+        # ✅ VALIDATION
+        validated = validate_requirements(analysis)
+        
+        requirements = validated.get("requirements", [])
+        conflicts = validated.get("conflicts", [])
+        ambiguities = validated.get("ambiguities", [])
+        
+        # ❌ BLOCK if conflicts
+        if conflicts:
+            yield send({
+                "step": "error",
+                "type": "conflict",
+                "details": conflicts
+            })
+            return
+        
+        # ⚠️ ASK USER if ambiguous
+        if ambiguities:
+            yield send({
+                "step": "clarification_needed",
+                "details": ambiguities
+            })
+            return
+
+        if not requirements:
+            yield send({
+                "step": "error",
+                "message": "No valid requirements extracted"
+            })
+            return
+        
+        # 📋 PLAN (NOW USING CLEAN INPUT)
+        plan = create_plan(requirements)
+        
+        yield send({
+            "step": "plan_created",
+            "requirements_count": len(requirements)
+        })
+        time.sleep(0.1)
 
             # 🧠 CODE GENERATION
             result = generate_code(plan)
