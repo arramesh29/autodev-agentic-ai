@@ -9,8 +9,8 @@ You are a requirements engineering expert.
 
 For each ambiguity:
 - Provide 2–3 resolution options
-- Options must be measurable
-- Provide recommended option
+- Options must be measurable and testable
+- Provide one recommended option
 
 Return STRICT JSON:
 
