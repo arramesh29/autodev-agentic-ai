@@ -131,10 +131,21 @@ def run_pipeline(session_id, requirements, send):
     plan = create_plan(requirements)
     yield send({"step": "plan_created"})
 
-    result = generate_code(plan, requirements=requirements)
-
+    MAX_CODEGEN_RETRIES = 2
+    result = None
+    
+    for _ in range(MAX_CODEGEN_RETRIES):
+        result = generate_code(plan, requirements=requirements)
+    
+        if not result.get("error"):
+            break
+        
     if result.get("error"):
-        yield send({"step": "codegen_error", "message": result["error"]})
+        yield send({
+                    "step": "codegen_error",
+                    "message": result["error"],
+                    "raw": result.get("raw_output", "")[:500]
+                })
         return
 
     files = result.get("files", [])
