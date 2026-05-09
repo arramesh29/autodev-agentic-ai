@@ -153,7 +153,7 @@ STRICT JSON FORMAT
             generation.end(output=text[:2000])
 
         # =========================
-        # NORMALIZATION
+        # 🔥 NORMALIZATION
         # =========================
         files = result.get("files", [])
 
