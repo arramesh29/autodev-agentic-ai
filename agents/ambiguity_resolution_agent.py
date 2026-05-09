@@ -8,26 +8,22 @@ def resolve_ambiguities_llm(requirements, ambiguities):
 You are a requirements engineering expert.
 
 For each ambiguity:
-- Provide 2–3 reasonable resolution options
-- Options must be measurable and testable
-- Do NOT assume final choice — let user decide
+- Provide 2–3 resolution options
+- Options must be measurable
+- Provide recommended option
 
 Return STRICT JSON:
 
 {{
-  "ambiguity_options": [
+  "step": "ambiguity_options",
+  "options": [
     {{
       "req_id": "REQ-001",
-      "issue": "...",
-      "options": [
-        "Option 1...",
-        "Option 2...",
-        "Option 3..."
-      ],
-      "recommended_option": "Option 1"
+      "question": "...",
+      "choices": ["...", "..."],
+      "recommended": "..."
     }}
-  ],
-  "needs_user_input": true
+  ]
 }}
 
 Requirements:
@@ -44,6 +40,6 @@ Ambiguities:
         return json.loads(text)
     except:
         return {
-            "ambiguity_options": [],
-            "needs_user_input": True
+            "step": "ambiguity_options",
+            "options": []
         }
