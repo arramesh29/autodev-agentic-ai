@@ -16,6 +16,7 @@ from agents.conflict_resolution_agent import resolve_conflicts_llm
 from agents.ambiguity_resolution_agent import resolve_ambiguities_llm
 
 from tools.requirements_validator import validate_requirements
+from tools.user_decision_handler import apply_user_choices
 from tools.test_parser import parse_ctest_output
 
 from tools.file_writer import write_files
@@ -109,17 +110,14 @@ def stream_workflow(query: str):
             
                 resolved = resolve_ambiguities_llm(requirements, ambiguities)
             
-                if resolved["needs_user_input"]:
-                    yield send(handle_user_input("ambiguity_resolution", resolved["questions"]))
-                    return
-            
-                requirements = resolved["resolved_requirements"]
-            
                 yield send({
-                    "step": "ambiguity_resolved",
-                    "log": resolved["resolution_log"]
+                    "step": "ambiguity_options",
+                    "options": resolved["ambiguity_options"]
                 })
-    
+            
+                # ⛔ STOP here and wait for user input (frontend must send response)
+                return
+                
             # ❌ NO VALID REQUIREMENTS
             if not requirements:
                 yield send({
@@ -207,3 +205,20 @@ def run_agent(request: dict):
 
     # You can call your existing run_workflow here if needed
     return {"status": "use /agent/stream for live execution"}
+
+@app.post("/agent/resolve-ambiguity")
+def resolve_ambiguity(request: dict):
+
+    requirements = request.get("requirements", [])
+    user_choices = request.get("choices", [])
+
+    updated_requirements = apply_user_choices(requirements, user_choices)
+
+    # Continue pipeline
+    plan = create_plan(updated_requirements)
+    result = generate_code(plan, requirements=updated_requirements)
+
+    return {
+        "step": "resumed",
+        "files": result.get("files", [])
+    }
