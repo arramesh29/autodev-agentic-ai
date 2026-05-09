@@ -2,13 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import json
-import time
 import uuid
 
-# 🔧 Routers
 from api.file_api import router as file_router
 
-# 🔧 Agents
 from agents.requirements_analysis_agent import analyze_requirements
 from agents.planner_agent import create_plan
 from agents.code_generation_agent import generate_code
@@ -16,7 +13,6 @@ from agents.debug_agent import fix_code
 from agents.conflict_resolution_agent import resolve_conflicts_llm
 from agents.ambiguity_resolution_agent import resolve_ambiguities_llm
 
-# 🔧 Tools
 from tools.requirements_validator import validate_requirements
 from tools.user_decision_handler import apply_user_choices
 from tools.test_parser import parse_ctest_output
@@ -25,7 +21,6 @@ from tools.cmake_generator import generate_cmake
 from tools.build_tool import build_and_test
 from tools.human_loop import handle_user_input
 from tools.confidence_scorer import compute_confidence
-
 
 app = FastAPI()
 
@@ -39,8 +34,7 @@ app.add_middleware(
 
 app.include_router(file_router)
 
-
-# 🔥 SESSION STORE (FIXED)
+# 🔥 SESSION STORE
 SESSION_STORE = {}
 
 
@@ -48,7 +42,7 @@ def sse(data):
     return f"data: {json.dumps(data)}\n\n"
 
 
-# 🚀 STREAMING ENDPOINT
+# 🚀 START PIPELINE
 @app.get("/agent/stream")
 def stream_workflow(query: str):
 
@@ -64,7 +58,6 @@ def stream_workflow(query: str):
         try:
             yield send({"step": "start"})
 
-            # 🧠 REQUIREMENTS ANALYSIS
             analysis = analyze_requirements(query)
             yield send({"step": "requirements_analyzed", "data": analysis})
 
@@ -78,35 +71,35 @@ def stream_workflow(query: str):
                 "requirements": requirements
             }
 
-            # 🔥 CONFLICT RESOLUTION
+            # 🔥 CONFLICT
             if conflicts:
                 yield send({"step": "conflict_detected", "details": conflicts})
 
                 resolved = resolve_conflicts_llm(requirements, conflicts)
 
                 if resolved.get("needs_user_input"):
+                    SESSION_STORE[session_id]["stage"] = "conflict"
                     yield send(handle_user_input("conflict_resolution", resolved["questions"]))
                     return
 
                 requirements = resolved["resolved_requirements"]
                 SESSION_STORE[session_id]["requirements"] = requirements
 
-                yield send({
-                    "step": "conflict_resolved",
-                    "log": resolved["resolution_log"]
-                })
+                yield send({"step": "conflict_resolved"})
 
-            # 🔥 AMBIGUITY HANDLING
+            # 🔥 AMBIGUITY
             if ambiguities:
+                SESSION_STORE[session_id]["stage"] = "ambiguity"
+
                 yield send({"step": "ambiguity_detected", "details": ambiguities})
 
                 resolved = resolve_ambiguities_llm(requirements, ambiguities)
 
-                yield send(resolved)  # must contain step="ambiguity_options"
+                yield send(resolved)
                 return
 
-            # 🚀 CONTINUE PIPELINE
-            yield from run_pipeline(requirements, send)
+            # 🚀 CONTINUE
+            yield from run_pipeline(session_id, requirements, send)
 
         except Exception as e:
             yield send({"step": "error", "message": str(e)})
@@ -114,16 +107,36 @@ def stream_workflow(query: str):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-# 🔥 FULL PIPELINE (WITH DEBUG LOOP PRESERVED)
-def run_pipeline(requirements, send):
+# 🚀 CONTINUE PIPELINE (🔥 NEW)
+@app.get("/agent/continue")
+def continue_pipeline(session_id: str):
+
+    session = SESSION_STORE.get(session_id, {})
+    requirements = session.get("requirements", [])
+
+    def event_stream():
+
+        def send(data):
+            data["session_id"] = session_id
+            return sse(data)
+
+        yield from run_pipeline(session_id, requirements, send)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+# 🔥 PIPELINE WITH DEBUG LOOP
+def run_pipeline(session_id, requirements, send):
 
     plan = create_plan(requirements)
-    yield send({
-        "step": "plan_created",
-        "requirements_count": len(requirements)
-    })
+    yield send({"step": "plan_created"})
 
     result = generate_code(plan, requirements=requirements)
+
+    if result.get("error"):
+        yield send({"step": "codegen_error", "message": result["error"]})
+        return
+
     files = result.get("files", [])
 
     yield send({
@@ -155,16 +168,31 @@ def run_pipeline(requirements, send):
             yield send({"step": "done"})
             return
 
-        # 🔧 DEBUG LOOP (RESTORED)
         fix_result = fix_code(output, files)
         files = fix_result.get("files", files)
-
         write_files(files)
 
     yield send({"step": "failed"})
 
 
-# 🚀 RESOLVE AMBIGUITY (CONTINUE PIPELINE)
+# 🔥 RESOLVE CONFLICT (UPDATED)
+@app.post("/agent/resolve-conflict")
+def resolve_conflict(request: dict):
+
+    session_id = request.get("session_id")
+    answers = request.get("answers", [])
+
+    session = SESSION_STORE.get(session_id, {})
+    requirements = session.get("requirements", [])
+
+    updated = apply_user_choices(requirements, answers)
+
+    SESSION_STORE[session_id]["requirements"] = updated
+
+    return {"status": "conflict_resolved"}
+
+
+# 🔥 RESOLVE AMBIGUITY (UPDATED)
 @app.post("/agent/resolve-ambiguity")
 def resolve_ambiguity(request: dict):
 
@@ -174,22 +202,13 @@ def resolve_ambiguity(request: dict):
     session = SESSION_STORE.get(session_id, {})
     requirements = session.get("requirements", [])
 
-    updated_requirements = apply_user_choices(requirements, decisions)
+    updated = apply_user_choices(requirements, decisions)
 
-    SESSION_STORE[session_id]["requirements"] = updated_requirements
+    SESSION_STORE[session_id]["requirements"] = updated
 
-    # 🔥 CONTINUE FULL PIPELINE (NOT PARTIAL)
-    def continuation():
-        def send(data):
-            data["session_id"] = session_id
-            return sse(data)
-
-        yield from run_pipeline(updated_requirements, send)
-
-    return StreamingResponse(continuation(), media_type="text/event-stream")
+    return {"status": "ambiguity_resolved"}
 
 
-# OPTIONAL
 @app.post("/agent/run")
 def run_agent(request: dict):
     return {"status": "use /agent/stream"}
