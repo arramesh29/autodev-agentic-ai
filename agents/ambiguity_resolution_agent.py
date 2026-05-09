@@ -7,27 +7,27 @@ def resolve_ambiguities_llm(requirements, ambiguities):
     prompt = f"""
 You are a requirements engineering expert.
 
-Convert ambiguous requirements into measurable and testable ones.
-
-Rules:
-- Do NOT guess blindly
-- Add derived requirements if needed
-- If unclear → ask user
+For each ambiguity:
+- Provide 2–3 reasonable resolution options
+- Options must be measurable and testable
+- Do NOT assume final choice — let user decide
 
 Return STRICT JSON:
 
 {{
-  "resolved_requirements": [...],
-  "resolution_log": [
+  "ambiguity_options": [
     {{
       "req_id": "REQ-001",
       "issue": "...",
-      "resolution": "...",
-      "confidence": "high | medium | low"
+      "options": [
+        "Option 1...",
+        "Option 2...",
+        "Option 3..."
+      ],
+      "recommended_option": "Option 1"
     }}
   ],
-  "needs_user_input": true/false,
-  "questions": ["..."]
+  "needs_user_input": true
 }}
 
 Requirements:
@@ -44,8 +44,6 @@ Ambiguities:
         return json.loads(text)
     except:
         return {
-            "resolved_requirements": requirements,
-            "resolution_log": [],
-            "needs_user_input": True,
-            "questions": ["Unable to resolve ambiguities automatically"]
+            "ambiguity_options": [],
+            "needs_user_input": True
         }
