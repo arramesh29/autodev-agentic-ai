@@ -12,14 +12,16 @@ from agents.requirements_analysis_agent import analyze_requirements
 from agents.planner_agent import create_plan
 from agents.code_generation_agent import generate_code
 from agents.debug_agent import fix_code
-
+from agents.conflict_resolution_agent import resolve_conflicts_llm
+from agents.ambiguity_resolution_agent import resolve_ambiguities_llm
 
 from tools.requirements_validator import validate_requirements
+from tools.test_parser import parse_ctest_output
+
 from tools.file_writer import write_files
 from tools.cmake_generator import generate_cmake
 from tools.build_tool import build_and_test
-
-from tools.test_parser import parse_ctest_output
+from tools.human_loop import handle_user_input
 from tools.confidence_scorer import compute_confidence
 
 
@@ -78,20 +80,45 @@ def stream_workflow(query: str):
     
             # ❌ BLOCK if conflicts
             if conflicts:
+            
                 yield send({
-                    "step": "error",
-                    "type": "conflict",
+                    "step": "conflict_detected",
                     "details": conflicts
                 })
-                return
+            
+                resolved = resolve_conflicts_llm(requirements, conflicts)
+            
+                if resolved["needs_user_input"]:
+                    yield send(handle_user_input("conflict_resolution", resolved["questions"]))
+                    return
+            
+                requirements = resolved["resolved_requirements"]
+            
+                yield send({
+                    "step": "conflict_resolved",
+                    "log": resolved["resolution_log"]
+                })
     
             # ⚠️ ASK USER if ambiguous
             if ambiguities:
+            
                 yield send({
-                    "step": "clarification_needed",
+                    "step": "ambiguity_detected",
                     "details": ambiguities
                 })
-                return
+            
+                resolved = resolve_ambiguities_llm(requirements, ambiguities)
+            
+                if resolved["needs_user_input"]:
+                    yield send(handle_user_input("ambiguity_resolution", resolved["questions"]))
+                    return
+            
+                requirements = resolved["resolved_requirements"]
+            
+                yield send({
+                    "step": "ambiguity_resolved",
+                    "log": resolved["resolution_log"]
+                })
     
             # ❌ NO VALID REQUIREMENTS
             if not requirements:
