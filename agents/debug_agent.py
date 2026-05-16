@@ -4,7 +4,7 @@ import re
 
 
 # =========================
-# 🔥 NEW: EXTRACT REQ IDs (ADDED)
+# 🔥 NEW: EXTRACT REQ IDs (UNCHANGED)
 # =========================
 def _extract_req_ids(text):
     if not isinstance(text, str):
@@ -13,7 +13,7 @@ def _extract_req_ids(text):
 
 
 # =========================
-# 🔥 NEW: MAP ERROR → REQ (ADDED)
+# 🔥 NEW: MAP ERROR → REQ (UNCHANGED)
 # =========================
 def _map_error_to_requirements(error_log, files):
     req_ids = set()
@@ -27,6 +27,17 @@ def _map_error_to_requirements(error_log, files):
         print(f"SENDING: {{'step': 'req_mapping_detected', 'req_ids': {list(req_ids)}}}")
 
     return list(req_ids)
+
+
+# =========================
+# 🔥 NEW: GET EXISTING FILENAMES (ADDED)
+# =========================
+def _get_existing_filenames(files):
+    return [
+        f.get("filename")
+        for f in files
+        if isinstance(f, dict) and f.get("filename")
+    ]
 
 
 # =========================
@@ -207,9 +218,11 @@ def _force_syntax_fix(files):
 
 
 # =========================
-# 🔥 UPDATED PROMPT (ONLY EXTENDED)
+# 🔥 FIXED PROMPT (ONLY CHANGE)
 # =========================
 def _build_prompt(error_type, error_log, files, error_locations=None, req_ids=None):
+
+    filenames = _get_existing_filenames(files)
 
     base = f"""
 You are a senior automotive C++ engineer.
@@ -221,7 +234,6 @@ FILES:
 {files}
 """
 
-    # 🔥 NEW ADDITION (SAFE)
     if req_ids:
         base += f"\nAFFECTED REQUIREMENTS: {req_ids}\n"
         base += """
@@ -242,12 +254,10 @@ Do not blindly modify entire file.
 
     base += """
 CRITICAL:
-- You MUST fix the issue
-- Minimal changes
-- Do NOT rewrite entire files unnecessarily
-- Preserve logic
-- Maintain REQ-ID traceability
-- You MUST change logic (no same code)
+- Fix the issue with minimal changes
+- Preserve logic and REQ traceability
+- DO NOT rename files
+- Use EXACT filenames below
 - Handle boundary + edge cases
 - Return ALL files
 - Valid compilable C++
@@ -274,25 +284,21 @@ FOCUS:
 - Compare expected vs actual
 - Fix either code OR test (not both blindly)
 """
-
     base += """
-IMPORTANT:
-- Preserve the original filenames. DO NOT change filenames
-- Maintain consistency across all files
+FILENAMES:
+{filenames}
 
 STRICT JSON FORMAT:
 
-{
+{{
   "files":[
-    {"filename":"featurename_controller.h","content":"..."},
-    {"filename":"featurename_controller.cpp","content":"..."},
-    {"filename":"test_featurename_controller.cpp","content":"..."}
+    {", ".join([f'{{"filename":"{fn}","content":"..."}}' for fn in filenames])}
   ],
-  "debug_summary": {
+  "debug_summary": {{
     "root_cause": "...",
     "fix": "..."
-  }
-}
+  }}
+}}
 """
 
     return base
@@ -311,13 +317,8 @@ def fix_code(error_log, files, trace=None, parent_span=None):
     print(f"SENDING: {{'step': 'error_classified', 'type': '{error_type}'}}")
 
     error_locations = _extract_error_location(error_log)
-
-    # 🔥 NEW (SAFE ADDITION)
     req_ids = _map_error_to_requirements(error_log, files)
 
-    # =========================
-    # SYNTAX FIX (UNCHANGED)
-    # =========================
     if error_type == "syntax":
         print("SENDING: {'step': 'syntax_error_detected'}")
 
@@ -394,9 +395,6 @@ def fix_code(error_log, files, trace=None, parent_span=None):
             if f["filename"] not in returned:
                 updated_files.append(f)
 
-        # =========================
-        # FORCE CHANGE
-        # =========================
         if not _files_changed(files, updated_files):
             print("SENDING: {'step': 'debug_no_change_detected'}")
 
