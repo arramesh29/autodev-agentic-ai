@@ -128,6 +128,8 @@ def stream_workflow(query: str):
 
             file_path = write_requirements_output(session_id, output_payload)
 
+            print("📁 Requirements saved at:", file_path)
+            
             yield send({
                 "step": "requirements_saved",
                 "file": file_path
