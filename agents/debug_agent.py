@@ -276,13 +276,14 @@ FOCUS:
 """
 
     base += """
+    replace the "featurename" with the same 3-4 letter code in the filenames below as used by the initial code generation agent before creating the JSON format as per below template.
 STRICT JSON FORMAT:
 
 {
   "files":[
-    {"filename":"aeb_controller.h","content":"..."},
-    {"filename":"aeb_controller.cpp","content":"..."},
-    {"filename":"test_aeb_controller.cpp","content":"..."}
+    {"filename":"featurename_controller.h","content":"..."},
+    {"filename":"featurename_controller.cpp","content":"..."},
+    {"filename":"test_featurename_controller.cpp","content":"..."}
   ],
   "debug_summary": {
     "root_cause": "...",
