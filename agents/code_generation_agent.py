@@ -70,7 +70,7 @@ Example:
     // REQ-001: TTC calculation
     float compute_ttc(...)
 
-    TEST(AEB, TTC_REQ001)
+    TEST(featurename, TTC_REQ001)
 
 ==============================
 GENERAL RULES
@@ -96,9 +96,10 @@ UNIT TEST RULES
 🚨 CRITICAL OUTPUT RULES
 ==============================
 - MUST generate ALL 3 files:
-  1. aeb_controller.h
-  2. aeb_controller.cpp
-  3. test_aeb_controller.cpp
+    Derive 3-4 letter feature identifier based on the requirements and replace the "featurename" with the same while usimg the prompts below.
+  1. featurename_controller.h
+  2. featurename_controller.cpp
+  3. test_featurename_controller.cpp
 
 - DO NOT skip any file
 - DO NOT return partial output
@@ -108,9 +109,9 @@ STRICT JSON FORMAT
 ==============================
 {{
   "files":[
-    {{"filename":"aeb_controller.h","content":"header code"}},
-    {{"filename":"aeb_controller.cpp","content":"implementation"}},
-    {{"filename":"test_aeb_controller.cpp","content":"GoogleTest code"}}
+    {{"filename":"featurename_controller.h","content":"header code"}},
+    {{"filename":"featurename_controller.cpp","content":"implementation"}},
+    {{"filename":"test_featurename_controller.cpp","content":"GoogleTest code"}}
   ]
 }}
 """
@@ -177,9 +178,9 @@ STRICT JSON FORMAT
         # REQUIRED FILE CHECK
         # =========================
         required_files = {
-            "aeb_controller.h",
-            "aeb_controller.cpp",
-            "test_aeb_controller.cpp"
+            "featurename_controller.h",
+            "featurename_controller.cpp",
+            "test_featurename_controller.cpp"
         }
 
         returned_files = set(f["filename"] for f in validated_files)
