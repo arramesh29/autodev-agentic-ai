@@ -177,19 +177,19 @@ STRICT JSON FORMAT
         # =========================
         # REQUIRED FILE CHECK
         # =========================
-        required_files = {
-            "featurename_controller.h",
-            "featurename_controller.cpp",
-            "test_featurename_controller.cpp"
-        }
-
-        returned_files = set(f["filename"] for f in validated_files)
-        missing_files = required_files - returned_files
-
-        if missing_files:
+        # 🔥 GENERIC FILE VALIDATION (FIXED)
+        
+        filenames = [f["filename"] for f in validated_files]
+        
+        header = any(fn.endswith("_controller.h") for fn in filenames)
+        impl = any(fn.endswith("_controller.cpp") and not fn.startswith("test_") for fn in filenames)
+        test = any(fn.startswith("test_") and fn.endswith("_controller.cpp") for fn in filenames)
+        
+        if not (header and impl and test):
             return {
-                "error": f"Missing required files: {missing_files}",
-                "raw_output": text
+                "error": "Missing required file types (header / impl / test)",
+                "raw_output": text,
+                "returned_files": filenames
             }
 
         # =========================
