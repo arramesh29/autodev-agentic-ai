@@ -157,6 +157,36 @@ def continue_pipeline(session_id: str):
             data["session_id"] = session_id
             return sse(data)
 
+        # 🔥 SAVE REQUIREMENTS HERE (CRITICAL FIX)
+        try:
+            output_payload = {
+                "metadata": {
+                    "session_id": session_id,
+                    "source": "user_input"
+                },
+                "input_requirements": session.get("input"),
+                "analyzed_requirements": session.get("analysis", {}).get("requirements", []),
+                "conflicts": session.get("conflicts", []),
+                "ambiguities": session.get("ambiguities", []),
+                "final_requirements": requirements
+            }
+
+            file_path = write_requirements_output(session_id, output_payload)
+
+            print("📁 Requirements saved at:", file_path)
+
+            yield send({
+                "step": "requirements_saved",
+                "file": file_path
+            })
+
+        except Exception as e:
+            yield send({
+                "step": "requirements_save_error",
+                "message": str(e)
+            })
+
+        # 🚀 Continue pipeline (unchanged)
         yield from run_pipeline(session_id, requirements, send)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
