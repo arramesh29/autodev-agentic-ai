@@ -276,7 +276,10 @@ FOCUS:
 """
 
     base += """
-    replace the "featurename" with the same 3-4 letter code in the filenames below as used by the initial code generation agent before creating the JSON format as per below template.
+IMPORTANT:
+- Preserve the original filenames. DO NOT change filenames
+- Maintain consistency across all files
+
 STRICT JSON FORMAT:
 
 {
