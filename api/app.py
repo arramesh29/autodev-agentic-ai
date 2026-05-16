@@ -21,6 +21,7 @@ from tools.cmake_generator import generate_cmake
 from tools.build_tool import build_and_test
 from tools.human_loop import handle_user_input
 from tools.confidence_scorer import compute_confidence
+from tools.requirements_output_writer import write_requirements_output
 
 app = FastAPI()
 
@@ -34,7 +35,6 @@ app.add_middleware(
 
 app.include_router(file_router)
 
-# 🔥 SESSION STORE
 SESSION_STORE = {}
 
 
@@ -67,8 +67,14 @@ def stream_workflow(query: str):
             conflicts = validated.get("conflicts", [])
             ambiguities = validated.get("ambiguities", [])
 
+            # 🔥 FULL SESSION TRACKING
             SESSION_STORE[session_id] = {
-                "requirements": requirements
+                "input": query,
+                "analysis": analysis,
+                "requirements": requirements,
+                "conflicts": conflicts,
+                "ambiguities": ambiguities,
+                "final_requirements": []
             }
 
             # 🔥 CONFLICT
@@ -95,10 +101,39 @@ def stream_workflow(query: str):
 
                 resolved = resolve_ambiguities_llm(requirements, ambiguities)
 
-                yield send(resolved)
-                return
+                # 🔥 AUTO-RESOLVED PATH
+                if resolved.get("step") == "ambiguity_resolved_auto":
+                    requirements = resolved["requirements"]
+                    SESSION_STORE[session_id]["requirements"] = requirements
 
-            # 🚀 CONTINUE
+                    yield send({"step": "ambiguity_auto_resolved"})
+                else:
+                    yield send(resolved)
+                    return
+
+            # 🔥 SAVE REQUIREMENTS OUTPUT BEFORE CODEGEN
+            SESSION_STORE[session_id]["final_requirements"] = requirements
+
+            output_payload = {
+                "metadata": {
+                    "session_id": session_id,
+                    "source": "user_input"
+                },
+                "input_requirements": query,
+                "analyzed_requirements": analysis.get("requirements", []),
+                "conflicts": conflicts,
+                "ambiguities": ambiguities,
+                "final_requirements": requirements
+            }
+
+            file_path = write_requirements_output(session_id, output_payload)
+
+            yield send({
+                "step": "requirements_saved",
+                "file": file_path
+            })
+
+            # 🚀 CONTINUE PIPELINE
             yield from run_pipeline(session_id, requirements, send)
 
         except Exception as e:
@@ -107,7 +142,7 @@ def stream_workflow(query: str):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-# 🚀 CONTINUE PIPELINE (🔥 NEW)
+# 🚀 CONTINUE PIPELINE
 @app.get("/agent/continue")
 def continue_pipeline(session_id: str):
 
@@ -133,19 +168,18 @@ def run_pipeline(session_id, requirements, send):
 
     MAX_CODEGEN_RETRIES = 2
     result = None
-    
+
     for _ in range(MAX_CODEGEN_RETRIES):
         result = generate_code(plan, requirements=requirements)
-    
         if not result.get("error"):
             break
-        
+
     if result.get("error"):
         yield send({
-                    "step": "codegen_error",
-                    "message": result["error"],
-                    "raw": result.get("raw_output", "")[:500]
-                })
+            "step": "codegen_error",
+            "message": result["error"],
+            "raw": result.get("raw_output", "")[:500]
+        })
         return
 
     files = result.get("files", [])
@@ -186,7 +220,7 @@ def run_pipeline(session_id, requirements, send):
     yield send({"step": "failed"})
 
 
-# 🔥 RESOLVE CONFLICT (UPDATED)
+# 🔥 RESOLVE CONFLICT
 @app.post("/agent/resolve-conflict")
 def resolve_conflict(request: dict):
 
@@ -199,11 +233,12 @@ def resolve_conflict(request: dict):
     updated = apply_user_choices(requirements, answers)
 
     SESSION_STORE[session_id]["requirements"] = updated
+    SESSION_STORE[session_id]["conflicts_resolved"] = answers
 
     return {"status": "conflict_resolved"}
 
 
-# 🔥 RESOLVE AMBIGUITY (UPDATED)
+# 🔥 RESOLVE AMBIGUITY
 @app.post("/agent/resolve-ambiguity")
 def resolve_ambiguity(request: dict):
 
@@ -216,6 +251,7 @@ def resolve_ambiguity(request: dict):
     updated = apply_user_choices(requirements, decisions)
 
     SESSION_STORE[session_id]["requirements"] = updated
+    SESSION_STORE[session_id]["ambiguities_resolved"] = decisions
 
     return {"status": "ambiguity_resolved"}
 
