@@ -1,4 +1,5 @@
 from services.llm_service import llm
+from tools.rag.rag_orchestrator import retrieve_context
 import json
 import re
 
@@ -39,7 +40,15 @@ def generate_code(plan, requirements=None, trace=None, parent_span=None):
     if requirements:
         for r in requirements:
             req_context += f"{r.get('id', 'REQ-UNK')}: {r.get('description', '')}\n"
+            
+    # =====================================================
+    # 🔥 RAG CONTEXT
+    # =====================================================
 
+    rag_context = retrieve_context(
+    req_context + str(plan),
+    "codegen")
+    
     # =========================
     # PROMPT
     # =========================
@@ -52,6 +61,11 @@ Generate production-grade C++ code and unit tests using GoogleTest.
 REQUIREMENTS (TRACEABLE)
 ==============================
 {req_context if requirements else "No structured requirements provided"}
+
+==============================
+REFERENCE CONTEXT:
+==============================
+{rag_context}
 
 ==============================
 DEVELOPMENT PLAN
