@@ -6,6 +6,6 @@ load_dotenv()
 
 # Plain LLM (no callbacks anymore)
 llm = ChatOpenAI(
-    model="gpt-5.4-mini",
+    model="gpt-5.4-nano",
     temperature=0
 )
