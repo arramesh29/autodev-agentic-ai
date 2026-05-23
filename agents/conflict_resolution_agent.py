@@ -1,11 +1,25 @@
 import json
 from services.llm_service import llm
 
+# 🔥 NEW
+from tools.rag.rag_orchestrator import retrieve_context
+
 
 def resolve_conflicts_llm(requirements, conflicts):
 
+    # =====================================================
+    # 🔥 RAG CONTEXT
+    # =====================================================
+    rag_context = retrieve_context(
+        json.dumps(conflicts),
+        "conflict"
+    )
+
     prompt = f"""
-You are a senior systems engineer.
+You are a senior automotive systems engineer.
+
+REFERENCE CONTEXT:
+{rag_context}
 
 Resolve requirement conflicts.
 
@@ -13,6 +27,7 @@ Rules:
 - Do NOT remove requirements
 - Add derived requirements if needed
 - Define precedence rules clearly
+- Use AIS/SPICE regulations if relevant
 - Be logically consistent
 
 Return STRICT JSON:
@@ -39,14 +54,19 @@ Conflicts:
 """
 
     response = llm.invoke(prompt)
+
     text = response.content.strip()
 
     try:
         return json.loads(text)
+
     except:
+
         return {
             "resolved_requirements": requirements,
             "resolution_log": [],
             "needs_user_input": True,
-            "questions": ["Unable to resolve conflicts automatically"]
+            "questions": [
+                "Unable to resolve conflicts automatically"
+            ]
         }
