@@ -1,4 +1,5 @@
 from services.llm_service import llm
+from tools.rag.rag_orchestrator import retrieve_context
 import json
 import re
 
@@ -224,11 +225,18 @@ def _build_prompt(error_type, error_log, files, error_locations=None, req_ids=No
 
     filenames = _get_existing_filenames(files)
 
+    rag_context = retrieve_context(
+        error_log,
+        "debug")
+    
     base = f"""
 You are a senior automotive C++ engineer.
 
 ERROR:
 {error_log}
+
+REFERENCE CONTEXT:
+{rag_context}
 
 FILES:
 {files}
