@@ -2,9 +2,19 @@ import json
 from services.llm_service import llm
 
 
+from tools.rag.rag_orchestrator import retrieve_context
+
+
 def analyze_requirements(raw_requirement):
 
-    # ✅ Use JSON object instead of manual string
+    # =====================================================
+    # 🔥 RAG CONTEXT
+    # =====================================================
+    rag_context = retrieve_context(
+        raw_requirement,
+        "requirements"
+    )
+
     example_output = {
         "requirements": [
             {
@@ -14,7 +24,8 @@ def analyze_requirements(raw_requirement):
                 "priority": "high",
                 "atomic": True,
                 "testable": True,
-                "tags": ["AEB", "safety"]
+                "tags": ["AEB", "safety"],
+                "source": "AIS reference if applicable"
             }
         ],
         "conflicts": [
@@ -32,6 +43,11 @@ def analyze_requirements(raw_requirement):
     }
 
     prompt = f"""
+You are an automotive requirements engineering expert.
+
+REFERENCE CONTEXT:
+{rag_context}
+
 Analyze automotive requirement and return STRICT JSON.
 
 Tasks:
@@ -41,6 +57,8 @@ Tasks:
 - Tag: functional / safety / performance / Non functional / No requirement
 - Detect conflicts
 - Detect ambiguities
+- Use AIS/SPICE standards if applicable
+- Add source reference if regulation/spec used
 
 Requirement:
 {raw_requirement}
@@ -63,6 +81,7 @@ IMPORTANT:
         return json.loads(text)
     except:
         print("Invalid JSON:", text)
+
         return {
             "requirements": [],
             "conflicts": [],
