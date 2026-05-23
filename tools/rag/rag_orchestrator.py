@@ -7,7 +7,7 @@ def retrieve_context(query, agent_type):
 
     docs = hybrid_search(query)
 
-    docs = rerank(query, docs)
+#    docs = rerank(query, docs)
 
     context = build_context(docs)
 
