@@ -42,7 +42,44 @@ def sse(data):
     return f"data: {json.dumps(data)}\n\n"
 
 
+# =========================================================
+# 🔥 NEW: SAVE REQUIREMENTS ONLY ONCE
+# =========================================================
+def save_requirements_once(session_id, requirements, send):
+
+    session = SESSION_STORE.get(session_id, {})
+
+    # 🔥 prevent duplicate save during debug/codegen retries
+    if session.get("requirements_saved"):
+        return None
+
+    output_payload = {
+        "metadata": {
+            "session_id": session_id,
+            "source": "user_input"
+        },
+        "input_requirements": session.get("input"),
+        "analyzed_requirements": session.get("analysis", {}).get("requirements", []),
+        "conflicts": session.get("conflicts", []),
+        "ambiguities": session.get("ambiguities", []),
+        "final_requirements": requirements
+    }
+
+    file_path = write_requirements_output(session_id, output_payload)
+
+    SESSION_STORE[session_id]["requirements_saved"] = True
+
+    print("📁 Requirements saved at:", file_path)
+
+    return send({
+        "step": "requirements_saved",
+        "file": file_path
+    })
+
+
+# =========================================================
 # 🚀 START PIPELINE
+# =========================================================
 @app.get("/agent/stream")
 def stream_workflow(query: str):
 
@@ -56,10 +93,18 @@ def stream_workflow(query: str):
             return sse(data)
 
         try:
+
             yield send({"step": "start"})
 
+            # =================================================
+            # REQUIREMENTS ANALYSIS
+            # =================================================
             analysis = analyze_requirements(query)
-            yield send({"step": "requirements_analyzed", "data": analysis})
+
+            yield send({
+                "step": "requirements_analyzed",
+                "data": analysis
+            })
 
             validated = validate_requirements(analysis)
 
@@ -67,151 +112,258 @@ def stream_workflow(query: str):
             conflicts = validated.get("conflicts", [])
             ambiguities = validated.get("ambiguities", [])
 
-            # 🔥 FULL SESSION TRACKING
+            # =================================================
+            # SESSION STORE
+            # =================================================
             SESSION_STORE[session_id] = {
                 "input": query,
                 "analysis": analysis,
                 "requirements": requirements,
                 "conflicts": conflicts,
                 "ambiguities": ambiguities,
-                "final_requirements": []
+                "final_requirements": [],
+                "requirements_saved": False,
+                "stage": "requirements"
             }
 
-            # 🔥 CONFLICT
+            # =================================================
+            # CONFLICT RESOLUTION
+            # =================================================
             if conflicts:
-                yield send({"step": "conflict_detected", "details": conflicts})
 
-                resolved = resolve_conflicts_llm(requirements, conflicts)
+                yield send({
+                    "step": "conflict_detected",
+                    "details": conflicts
+                })
 
+                resolved = resolve_conflicts_llm(
+                    requirements,
+                    conflicts
+                )
+
+                # ---------------------------------------------
+                # USER INPUT REQUIRED
+                # ---------------------------------------------
                 if resolved.get("needs_user_input"):
+
                     SESSION_STORE[session_id]["stage"] = "conflict"
-                    yield send(handle_user_input("conflict_resolution", resolved["questions"]))
+
+                    yield send(
+                        handle_user_input(
+                            "conflict_resolution",
+                            resolved["questions"]
+                        )
+                    )
+
                     return
 
+                # ---------------------------------------------
+                # AUTO RESOLVED
+                # ---------------------------------------------
                 requirements = resolved["resolved_requirements"]
+
                 SESSION_STORE[session_id]["requirements"] = requirements
 
-                yield send({"step": "conflict_resolved"})
+                yield send({
+                    "step": "conflict_resolved"
+                })
 
-            # 🔥 AMBIGUITY
+            # =================================================
+            # AMBIGUITY RESOLUTION
+            # =================================================
             if ambiguities:
+
                 SESSION_STORE[session_id]["stage"] = "ambiguity"
 
-                yield send({"step": "ambiguity_detected", "details": ambiguities})
+                yield send({
+                    "step": "ambiguity_detected",
+                    "details": ambiguities
+                })
 
-                resolved = resolve_ambiguities_llm(requirements, ambiguities)
+                resolved = resolve_ambiguities_llm(
+                    requirements,
+                    ambiguities
+                )
 
-                # 🔥 AUTO-RESOLVED PATH
+                # ---------------------------------------------
+                # AUTO RESOLVED
+                # ---------------------------------------------
                 if resolved.get("step") == "ambiguity_resolved_auto":
+
                     requirements = resolved["requirements"]
+
                     SESSION_STORE[session_id]["requirements"] = requirements
 
-                    yield send({"step": "ambiguity_auto_resolved"})
+                    yield send({
+                        "step": "ambiguity_auto_resolved"
+                    })
+
+                # ---------------------------------------------
+                # USER INPUT REQUIRED
+                # ---------------------------------------------
                 else:
+
                     yield send(resolved)
+
                     return
 
-            # 🔥 SAVE REQUIREMENTS OUTPUT BEFORE CODEGEN
+            # =================================================
+            # FINAL REQUIREMENTS
+            # =================================================
             SESSION_STORE[session_id]["final_requirements"] = requirements
 
-            output_payload = {
-                "metadata": {
-                    "session_id": session_id,
-                    "source": "user_input"
-                },
-                "input_requirements": query,
-                "analyzed_requirements": analysis.get("requirements", []),
-                "conflicts": conflicts,
-                "ambiguities": ambiguities,
-                "final_requirements": requirements
-            }
+            # =================================================
+            # SAVE REQUIREMENTS ONLY ONCE
+            # =================================================
+            msg = save_requirements_once(
+                session_id,
+                requirements,
+                send
+            )
 
-            file_path = write_requirements_output(session_id, output_payload)
+            if msg:
+                yield msg
 
-            print("📁 Requirements saved at:", file_path)
-            
-            yield send({
-                "step": "requirements_saved",
-                "file": file_path
-            })
-
-            # 🚀 CONTINUE PIPELINE
-            yield from run_pipeline(session_id, requirements, send)
+            # =================================================
+            # RUN IMPLEMENTATION PIPELINE
+            # =================================================
+            yield from run_pipeline(
+                session_id,
+                requirements,
+                send
+            )
 
         except Exception as e:
-            yield send({"step": "error", "message": str(e)})
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+            yield send({
+                "step": "error",
+                "message": str(e)
+            })
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream"
+    )
 
 
+# =========================================================
 # 🚀 CONTINUE PIPELINE
+# =========================================================
 @app.get("/agent/continue")
 def continue_pipeline(session_id: str):
 
     session = SESSION_STORE.get(session_id, {})
+
     requirements = session.get("requirements", [])
 
     def event_stream():
 
         def send(data):
             data["session_id"] = session_id
+            print("SENDING:", data)
             return sse(data)
 
-        # 🔥 SAVE REQUIREMENTS HERE (CRITICAL FIX)
         try:
-            output_payload = {
-                "metadata": {
-                    "session_id": session_id,
-                    "source": "user_input"
-                },
-                "input_requirements": session.get("input"),
-                "analyzed_requirements": session.get("analysis", {}).get("requirements", []),
-                "conflicts": session.get("conflicts", []),
-                "ambiguities": session.get("ambiguities", []),
-                "final_requirements": requirements
-            }
 
-            file_path = write_requirements_output(session_id, output_payload)
+            # =================================================
+            # SAFETY CHECK
+            # =================================================
+            if not requirements:
 
-            print("📁 Requirements saved at:", file_path)
+                yield send({
+                    "step": "blocked",
+                    "message": "No resolved requirements available"
+                })
 
-            yield send({
-                "step": "requirements_saved",
-                "file": file_path
-            })
+                return
+
+            # =================================================
+            # FINAL REQUIREMENTS
+            # =================================================
+            SESSION_STORE[session_id]["final_requirements"] = requirements
+
+            # =================================================
+            # SAVE ONLY ONCE
+            # =================================================
+            msg = save_requirements_once(
+                session_id,
+                requirements,
+                send
+            )
+
+            if msg:
+                yield msg
+
+            # =================================================
+            # CONTINUE IMPLEMENTATION PIPELINE
+            # =================================================
+            yield from run_pipeline(
+                session_id,
+                requirements,
+                send
+            )
 
         except Exception as e:
+
             yield send({
-                "step": "requirements_save_error",
+                "step": "error",
                 "message": str(e)
             })
 
-        # 🚀 Continue pipeline (unchanged)
-        yield from run_pipeline(session_id, requirements, send)
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream"
+    )
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
-
-# 🔥 PIPELINE WITH DEBUG LOOP
+# =========================================================
+# 🔥 IMPLEMENTATION PIPELINE
+# =========================================================
 def run_pipeline(session_id, requirements, send):
 
+    # =====================================================
+    # PLAN
+    # =====================================================
     plan = create_plan(requirements)
-    yield send({"step": "plan_created"})
 
+    yield send({
+        "step": "plan_created"
+    })
+
+    # =====================================================
+    # CODEGEN
+    # =====================================================
     MAX_CODEGEN_RETRIES = 2
+
     result = None
 
-    for _ in range(MAX_CODEGEN_RETRIES):
-        result = generate_code(plan, requirements=requirements)
+    for retry in range(MAX_CODEGEN_RETRIES):
+
+        result = generate_code(
+            plan,
+            requirements=requirements
+        )
+
         if not result.get("error"):
             break
 
+        yield send({
+            "step": "codegen_retry",
+            "attempt": retry + 1,
+            "message": result.get("error")
+        })
+
+    # =====================================================
+    # CODEGEN FAILURE
+    # =====================================================
     if result.get("error"):
+
         yield send({
             "step": "codegen_error",
             "message": result["error"],
             "raw": result.get("raw_output", "")[:500]
         })
+
         return
 
     files = result.get("files", [])
@@ -221,18 +373,29 @@ def run_pipeline(session_id, requirements, send):
         "files": [f["filename"] for f in files]
     })
 
+    # =====================================================
+    # WRITE FILES
+    # =====================================================
     write_files(files)
+
     generate_cmake(files)
 
+    # =====================================================
+    # BUILD + DEBUG LOOP
+    # =====================================================
     MAX_RETRIES = 5
 
     for attempt in range(MAX_RETRIES):
 
-        yield send({"step": "build_attempt", "attempt": attempt})
+        yield send({
+            "step": "build_attempt",
+            "attempt": attempt
+        })
 
         output = build_and_test()
 
         parsed = parse_ctest_output(output)
+
         confidence = compute_confidence(parsed)
 
         yield send({
@@ -241,53 +404,96 @@ def run_pipeline(session_id, requirements, send):
             "confidence": confidence
         })
 
+        # -------------------------------------------------
+        # SUCCESS
+        # -------------------------------------------------
         if confidence["status"] == "success":
-            yield send({"step": "done"})
+
+            yield send({
+                "step": "done"
+            })
+
             return
 
+        # -------------------------------------------------
+        # DEBUG FIX
+        # -------------------------------------------------
         fix_result = fix_code(output, files)
+
         files = fix_result.get("files", files)
+
         write_files(files)
 
-    yield send({"step": "failed"})
+    # =====================================================
+    # FAILED AFTER RETRIES
+    # =====================================================
+    yield send({
+        "step": "failed"
+    })
 
 
+# =========================================================
 # 🔥 RESOLVE CONFLICT
+# =========================================================
 @app.post("/agent/resolve-conflict")
 def resolve_conflict(request: dict):
 
     session_id = request.get("session_id")
+
     answers = request.get("answers", [])
 
     session = SESSION_STORE.get(session_id, {})
+
     requirements = session.get("requirements", [])
 
-    updated = apply_user_choices(requirements, answers)
+    updated = apply_user_choices(
+        requirements,
+        answers
+    )
 
     SESSION_STORE[session_id]["requirements"] = updated
+
     SESSION_STORE[session_id]["conflicts_resolved"] = answers
 
-    return {"status": "conflict_resolved"}
+    return {
+        "status": "conflict_resolved"
+    }
 
 
+# =========================================================
 # 🔥 RESOLVE AMBIGUITY
+# =========================================================
 @app.post("/agent/resolve-ambiguity")
 def resolve_ambiguity(request: dict):
 
     session_id = request.get("session_id")
+
     decisions = request.get("decisions", [])
 
     session = SESSION_STORE.get(session_id, {})
+
     requirements = session.get("requirements", [])
 
-    updated = apply_user_choices(requirements, decisions)
+    updated = apply_user_choices(
+        requirements,
+        decisions
+    )
 
     SESSION_STORE[session_id]["requirements"] = updated
+
     SESSION_STORE[session_id]["ambiguities_resolved"] = decisions
 
-    return {"status": "ambiguity_resolved"}
+    return {
+        "status": "ambiguity_resolved"
+    }
 
 
+# =========================================================
+# 🚀 LEGACY API
+# =========================================================
 @app.post("/agent/run")
 def run_agent(request: dict):
-    return {"status": "use /agent/stream"}
+
+    return {
+        "status": "use /agent/stream"
+    }
