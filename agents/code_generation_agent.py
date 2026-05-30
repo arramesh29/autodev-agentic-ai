@@ -1,6 +1,7 @@
 from services.llm_service import llm
 from tools.rag.rag_orchestrator import retrieve_context
 from tools.traceability import generate_traceability
+from tools.coverage_validator import validate_requirement_coverage
 import json
 import re
 
@@ -86,6 +87,27 @@ Example:
     float compute_ttc(...)
 
     TEST(featurename, TTC_REQ001)
+
+==============================
+REQUIREMENT COVERAGE RULE
+==============================
+
+ALL requirements MUST be implemented.
+
+Every requirement listed above must appear:
+
+REQ
+  ↓
+Code
+  ↓
+Test
+
+No requirement may be ignored.
+
+If 33 requirements exist,
+33 requirements must be represented.
+
+Do not implement only a subset.
 
 ==============================
 GENERAL RULES
@@ -220,6 +242,39 @@ STRICT JSON FORMAT
 
         result["files"] = validated_files
 
+        # =====================================================
+        # REQUIREMENT COVERAGE VALIDATION
+        # =====================================================
+        
+        coverage = validate_requirement_coverage(
+            requirements=requirements,
+            generated_files=validated_files
+        )
+        
+        coverage_percent = (
+            coverage["summary"]
+            ["coverage_percent"]
+        )
+        
+        missing = coverage[
+            "missing_requirements"
+        ]
+        
+        print(
+            f"📊 Coverage = {coverage_percent}%"
+        )
+        
+        if missing:
+        
+            return {
+                "error":
+                    "Incomplete implementation",
+                "missing_requirements":
+                    missing,
+                "coverage":
+                    coverage
+            }
+        
         # =====================================================
         # TRACEABILITY GENERATION
         # =====================================================
