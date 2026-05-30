@@ -294,10 +294,7 @@ STRICT JSON FORMAT
             }
 
 
-        yield {
-            "step": "coverage_report",
-            "coverage": coverage
-        }
+        result["coverage_report"] = coverage
 
         # =====================================================
         # TRACEABILITY GENERATION
