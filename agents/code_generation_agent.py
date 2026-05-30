@@ -264,17 +264,41 @@ STRICT JSON FORMAT
             f"📊 Coverage = {coverage_percent}%"
         )
         
-        if missing:
+        MIN_COVERAGE = 90.0
+        
+        if coverage_percent < MIN_COVERAGE:
         
             return {
                 "error":
-                    "Incomplete implementation",
+                    "Coverage below threshold",
+                "coverage_percent":
+                    coverage_percent,
                 "missing_requirements":
                     missing,
                 "coverage":
                     coverage
             }
         
+        if missing:
+        
+            print(
+                f"⚠ Coverage warning:"
+                f" {len(missing)} requirements not implemented"
+            )
+        
+            result["coverage_warning"] = {
+                "coverage_percent":
+                    coverage_percent,
+                "missing_requirements":
+                    missing
+            }
+
+
+        yield {
+            "step": "coverage_report",
+            "coverage": coverage
+        }
+
         # =====================================================
         # TRACEABILITY GENERATION
         # =====================================================
