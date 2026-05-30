@@ -1,5 +1,6 @@
 from services.llm_service import llm
 from tools.rag.rag_orchestrator import retrieve_context
+from tools.traceability import generate_traceability
 import json
 import re
 
@@ -219,6 +220,22 @@ STRICT JSON FORMAT
 
         result["files"] = validated_files
 
+        # =====================================================
+        # TRACEABILITY GENERATION
+        # =====================================================
+        try:
+        
+            generate_traceability(
+                requirements=requirements,
+                generated_files=validated_files
+            )
+        
+        except Exception as e:
+        
+            print(
+                f"Traceability generation failed: {e}"
+            )
+                
         if span:
             span.end(output={"file_count": len(validated_files)})
 
