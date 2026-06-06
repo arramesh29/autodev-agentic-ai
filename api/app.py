@@ -22,6 +22,7 @@ from tools.build_tool import build_and_test
 from tools.human_loop import handle_user_input
 from tools.confidence_scorer import compute_confidence
 from tools.requirements_output_writer import write_requirements_output
+from tools.metrics_collector import generate_execution_metrics
 
 app = FastAPI()
 
@@ -235,6 +236,12 @@ def stream_workflow(query: str):
 
         except Exception as e:
 
+            yield emit_metrics(
+                session_id,
+                "PIPELINE_EXCEPTION",
+                send
+            )
+            
             yield send({
                 "step": "error",
                 "message": str(e)
@@ -305,6 +312,12 @@ def continue_pipeline(session_id: str):
 
         except Exception as e:
 
+            yield emit_metrics(
+                session_id,
+                "PIPELINE_EXCEPTION",
+                send
+            )
+            
             yield send({
                 "step": "error",
                 "message": str(e)
@@ -315,6 +328,49 @@ def continue_pipeline(session_id: str):
         media_type="text/event-stream"
     )
 
+    def emit_metrics(
+        session_id,
+        status,
+        send
+    ):
+    
+        try:
+    
+            req_file = None
+    
+            generated_dir = "generated"
+    
+            if os.path.exists(generated_dir):
+    
+                for f in os.listdir(generated_dir):
+    
+                    if (
+                        f.startswith("requirements_")
+                        and session_id in f
+                    ):
+                        req_file = os.path.join(
+                            generated_dir,
+                            f
+                        )
+                        break
+    
+            metrics = generate_execution_metrics(
+                session_id=session_id,
+                pipeline_status=status,
+                requirements_file=req_file
+            )
+    
+            return send({
+                "step": "metrics_generated",
+                "metrics": metrics
+            })
+    
+        except Exception as e:
+    
+            return send({
+                "step": "metrics_generation_failed",
+                "message": str(e)
+            })
 
 # =========================================================
 # 🔥 IMPLEMENTATION PIPELINE
@@ -363,7 +419,12 @@ def run_pipeline(session_id, requirements, send):
             "message": result["error"],
             "raw": result.get("raw_output", "")[:500]
         })
-
+        
+        yield emit_metrics(
+            session_id,
+            "CODEGEN_FAILED",
+            send
+        )
         return
 
     files = result.get("files", [])
@@ -408,11 +469,17 @@ def run_pipeline(session_id, requirements, send):
         # SUCCESS
         # -------------------------------------------------
         if confidence["status"] == "success":
-
+        
+            yield emit_metrics(
+                session_id,
+                "SUCCESS",
+                send
+            )
+        
             yield send({
                 "step": "done"
             })
-
+        
             return
 
         # -------------------------------------------------
@@ -427,6 +494,12 @@ def run_pipeline(session_id, requirements, send):
     # =====================================================
     # FAILED AFTER RETRIES
     # =====================================================
+    yield emit_metrics(
+        session_id,
+        "DEBUG_FAILED",
+        send
+    )
+    
     yield send({
         "step": "failed"
     })
