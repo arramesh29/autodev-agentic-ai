@@ -77,6 +77,49 @@ def save_requirements_once(session_id, requirements, send):
         "file": file_path
     })
 
+def emit_metrics(
+    session_id,
+    status,
+    send
+):
+
+    try:
+
+        req_file = None
+
+        generated_dir = "generated"
+
+        if os.path.exists(generated_dir):
+
+            for f in os.listdir(generated_dir):
+
+                if (
+                    f.startswith("requirements_")
+                    and session_id in f
+                ):
+                    req_file = os.path.join(
+                        generated_dir,
+                        f
+                    )
+                    break
+
+        metrics = generate_execution_metrics(
+            session_id=session_id,
+            pipeline_status=status,
+            requirements_file=req_file
+        )
+
+        return send({
+            "step": "metrics_generated",
+            "metrics": metrics
+        })
+
+    except Exception as e:
+
+        return send({
+            "step": "metrics_generation_failed",
+            "message": str(e)
+        })
 
 # =========================================================
 # 🚀 START PIPELINE
@@ -236,12 +279,20 @@ def stream_workflow(query: str):
 
         except Exception as e:
 
-            yield emit_metrics(
-                session_id,
-                "PIPELINE_EXCEPTION",
-                send
-            )
+            try:
             
+                yield emit_metrics(
+                    session_id,
+                    "PIPELINE_EXCEPTION",
+                    send
+                )
+            
+            except Exception as e:
+            
+                print(
+                    f"Metrics generation failed: {e}"
+                )
+
             yield send({
                 "step": "error",
                 "message": str(e)
@@ -312,11 +363,19 @@ def continue_pipeline(session_id: str):
 
         except Exception as e:
 
-            yield emit_metrics(
-                session_id,
-                "PIPELINE_EXCEPTION",
-                send
-            )
+             try:
+            
+                yield emit_metrics(
+                    session_id,
+                    "PIPELINE_EXCEPTION",
+                    send
+                )
+            
+            except Exception as e:
+            
+                print(
+                    f"Metrics generation failed: {e}"
+                )
             
             yield send({
                 "step": "error",
@@ -328,49 +387,6 @@ def continue_pipeline(session_id: str):
         media_type="text/event-stream"
     )
 
-    def emit_metrics(
-        session_id,
-        status,
-        send
-    ):
-    
-        try:
-    
-            req_file = None
-    
-            generated_dir = "generated"
-    
-            if os.path.exists(generated_dir):
-    
-                for f in os.listdir(generated_dir):
-    
-                    if (
-                        f.startswith("requirements_")
-                        and session_id in f
-                    ):
-                        req_file = os.path.join(
-                            generated_dir,
-                            f
-                        )
-                        break
-    
-            metrics = generate_execution_metrics(
-                session_id=session_id,
-                pipeline_status=status,
-                requirements_file=req_file
-            )
-    
-            return send({
-                "step": "metrics_generated",
-                "metrics": metrics
-            })
-    
-        except Exception as e:
-    
-            return send({
-                "step": "metrics_generation_failed",
-                "message": str(e)
-            })
 
 # =========================================================
 # 🔥 IMPLEMENTATION PIPELINE
@@ -420,11 +436,20 @@ def run_pipeline(session_id, requirements, send):
             "raw": result.get("raw_output", "")[:500]
         })
         
-        yield emit_metrics(
-            session_id,
-            "CODEGEN_FAILED",
-            send
-        )
+        try:
+        
+            yield emit_metrics(
+                session_id,
+                "CODEGEN_FAILED",
+                send
+            )
+        
+        except Exception as e:
+        
+            print(
+                f"Metrics generation failed: {e}"
+            )
+        
         return
 
     files = result.get("files", [])
@@ -470,11 +495,19 @@ def run_pipeline(session_id, requirements, send):
         # -------------------------------------------------
         if confidence["status"] == "success":
         
-            yield emit_metrics(
-                session_id,
-                "SUCCESS",
-                send
-            )
+            try:
+            
+                yield emit_metrics(
+                    session_id,
+                    "SUCCESS",
+                    send
+                )
+            
+            except Exception as e:
+            
+                print(
+                    f"Metrics generation failed: {e}"
+                )
         
             yield send({
                 "step": "done"
@@ -494,11 +527,19 @@ def run_pipeline(session_id, requirements, send):
     # =====================================================
     # FAILED AFTER RETRIES
     # =====================================================
-    yield emit_metrics(
-        session_id,
-        "DEBUG_FAILED",
-        send
-    )
+    try:
+    
+        yield emit_metrics(
+            session_id,
+            "DEBUG_FAILED",
+            send
+        )
+    
+    except Exception as e:
+    
+        print(
+            f"Metrics generation failed: {e}"
+        )
     
     yield send({
         "step": "failed"
