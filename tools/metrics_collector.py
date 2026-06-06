@@ -17,53 +17,45 @@ def load_json(path):
 
 
 def generate_execution_metrics(
-    requirements_file,
-    coverage_file,
-    traceability_file,
+    session_id,
+    pipeline_status,
+    requirements_file=None,
+    coverage_file="generated/implementation_coverage.json",
+    traceability_file="generated/traceability.json",
     output_file="generated/execution_metrics.json"
 ):
 
-    requirements = load_json(requirements_file)
+    metrics = {
+        "session_id": session_id,
+        "timestamp": datetime.now().isoformat(),
+        "pipeline_status": pipeline_status,
+
+        "requirements_total": 0,
+        "requirements_implemented": 0,
+        "requirements_linked": 0,
+
+        "requirement_coverage": 0,
+        "traceability_coverage": 0,
+
+        "ambiguities_detected": 0,
+        "ambiguities_resolved": 0,
+
+        "conflicts_detected": 0,
+        "conflicts_resolved": 0
+    }
+
+    requirements = load_json(requirements_file) \
+        if requirements_file else {}
 
     coverage = load_json(coverage_file)
 
     traceability = load_json(traceability_file)
 
-    metrics = {
-
-        "timestamp":
-            datetime.now().isoformat(),
-
-        "requirements_total": 0,
-
-        "requirements_implemented": 0,
-
-        "requirements_linked": 0,
-
-        "requirement_coverage": 0,
-
-        "traceability_coverage": 0,
-
-        "ambiguities_detected": 0,
-
-        "ambiguities_resolved": 0,
-
-        "conflicts_detected": 0,
-
-        "conflicts_resolved": 0
-    }
-
-    # -----------------------------------
-    # REQUIREMENTS
-    # -----------------------------------
-
-    final_reqs = requirements.get(
-        "final_requirements",
-        []
-    )
-
     metrics["requirements_total"] = len(
-        final_reqs
+        requirements.get(
+            "final_requirements",
+            []
+        )
     )
 
     metrics["ambiguities_detected"] = len(
@@ -79,10 +71,6 @@ def generate_execution_metrics(
             []
         )
     )
-
-    # -----------------------------------
-    # COVERAGE
-    # -----------------------------------
 
     coverage_summary = coverage.get(
         "summary",
@@ -103,10 +91,6 @@ def generate_execution_metrics(
         )
     )
 
-    # -----------------------------------
-    # TRACEABILITY
-    # -----------------------------------
-
     trace_summary = traceability.get(
         "summary",
         {}
@@ -126,14 +110,6 @@ def generate_execution_metrics(
         )
     )
 
-    # -----------------------------------
-    # FUTURE PLACEHOLDERS
-    # -----------------------------------
-
-    metrics["ambiguities_resolved"] = 0
-
-    metrics["conflicts_resolved"] = 0
-
     os.makedirs(
         os.path.dirname(output_file),
         exist_ok=True
@@ -150,9 +126,5 @@ def generate_execution_metrics(
             f,
             indent=2
         )
-
-    print(
-        f"📊 Metrics generated: {output_file}"
-    )
 
     return metrics
