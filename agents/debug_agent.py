@@ -292,7 +292,7 @@ FOCUS:
 - Compare expected vs actual
 - Fix either code OR test (not both blindly)
 """
-    base += """
+    base += f"""
 FILENAMES:
 {filenames}
 
