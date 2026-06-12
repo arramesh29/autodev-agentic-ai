@@ -205,6 +205,84 @@ def _extract_file_context(
 
     return reduced or files
 
+def _select_debug_context(
+    error_log,
+    files,
+    error_locations
+):
+    """
+    Decide whether to send:
+      - Small snippets
+      - Full affected files
+      - Entire project
+    """
+
+    log = error_log.lower()
+
+    architectural_patterns = [
+        "not a member",
+        "undeclared identifier",
+        "illegal member initialization",
+        "expected an expression instead of a type",
+        "constructor",
+        "class",
+        "namespace",
+        "template",
+        "vector",
+        "map",
+        "sort"
+    ]
+
+    architecture_score = sum(
+        1
+        for p in architectural_patterns
+        if p in log
+    )
+
+    error_count = len(error_locations or [])
+
+    # -----------------------------
+    # SIMPLE LOCAL FIX
+    # -----------------------------
+    if error_count <= 5 and architecture_score == 0:
+
+        print(
+            "SENDING: "
+            "{'step':'debug_context_mode','mode':'snippet'}"
+        )
+
+        return _extract_file_context(
+            files,
+            error_locations,
+            radius=30
+        )
+
+    # -----------------------------
+    # ARCHITECTURAL FIX
+    # -----------------------------
+    if architecture_score >= 3 or error_count > 15:
+
+        print(
+            "SENDING: "
+            "{'step':'debug_context_mode','mode':'full_file'}"
+        )
+
+        return files
+
+    # -----------------------------
+    # MEDIUM COMPLEXITY
+    # -----------------------------
+    print(
+        "SENDING: "
+        "{'step':'debug_context_mode','mode':'expanded_snippet'}"
+    )
+
+    return _extract_file_context(
+        files,
+        error_locations,
+        radius=100
+    )
+
 def _extract_json(text):
 
     if not text:
@@ -369,10 +447,48 @@ def _force_syntax_fix(files):
 
     return fixed_files
 
+def _validate_patch_size(
+    original_files,
+    updated_files
+):
 
-# =========================
-# 🔥 FIXED PROMPT (ONLY CHANGE)
-# =========================
+    original_map = {
+        f["filename"]: len(f["content"])
+        for f in original_files
+    }
+
+    validated = []
+
+    for f in updated_files:
+
+        filename = f["filename"]
+
+        old_size = original_map.get(
+            filename,
+            0
+        )
+
+        new_size = len(f["content"])
+
+        if old_size > 1000:
+
+            ratio = new_size / old_size
+
+            if ratio < 0.80:
+
+                print(
+                    f"SENDING: "
+                    f"{{'step':'patch_rejected',"
+                    f"'file':'{filename}',"
+                    f"'reason':'size_reduction'}}"
+                )
+
+                continue
+
+        validated.append(f)
+
+    return validated
+
 def _build_prompt(error_type, error_log, files, error_locations=None, req_ids=None):
 
     filenames = _get_existing_filenames(files)
@@ -424,6 +540,19 @@ CRITICAL:
 - Do NOT introduce new syntax errors
 - If multiple syntax errors exist, fix structure carefully
 - Prefer fixing declarations and structure over random edits
+"""
+
+base += """
+IMPORTANT:
+
+Do NOT regenerate entire files.
+Preserve all existing logic.
+Preserve all classes.
+Preserve all methods.
+Preserve all requirement mappings.
+Apply targeted fixes only.
+Never remove code unless required to fix compilation.
+Large code deletions are forbidden.
 """
 
     if error_type == "build":
@@ -521,7 +650,8 @@ def fix_code(error_log, files, trace=None, parent_span=None):
                 "llm_response": None
             }
 
-    prompt_files = _extract_file_context(
+    prompt_files = _select_debug_context(
+        error_log,
         files,
         error_locations
     )
@@ -621,6 +751,8 @@ def fix_code(error_log, files, trace=None, parent_span=None):
             updated_files = [updated_files]
         
         updated_files = _normalize_files(updated_files)
+
+        updated_files = _validate_patch_size(files,updated_files)
         
         if not updated_files:
         
