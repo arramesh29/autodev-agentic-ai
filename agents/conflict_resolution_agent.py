@@ -25,7 +25,11 @@ Resolve requirement conflicts.
 
 Rules:
 - Do NOT remove requirements
-- Add derived requirements if needed
+- Do NOT create new requirement IDs
+- Preserve all original requirement IDs
+- Add clarifications, notes, assumptions,
+  precedence rules, or metadata only
+- Requirement count must remain unchanged
 - Define precedence rules clearly
 - Use AIS/SPICE regulations if relevant
 - Be logically consistent
