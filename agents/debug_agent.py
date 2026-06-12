@@ -142,39 +142,128 @@ def _extract_error_location(error_log):
 
     return None
 
+def _extract_file_context(
+    files,
+    error_locations,
+    radius=20
+):
+
+    if not error_locations:
+        return files
+
+    reduced = []
+
+    for f in files:
+
+        filename = f["filename"]
+
+        matching = [
+            loc
+            for loc in error_locations
+            if loc["file"] == filename
+        ]
+
+        if not matching:
+            continue
+
+        lines = f["content"].splitlines()
+
+        snippets = []
+
+        for loc in matching:
+
+            line_no = loc["line"]
+
+            start = max(
+                0,
+                line_no - radius
+            )
+
+            end = min(
+                len(lines),
+                line_no + radius
+            )
+
+            snippet = "\n".join(
+                lines[start:end]
+            )
+
+            snippets.append(
+                f"\n=== ERROR AREA "
+                f"(line {line_no}) ===\n"
+                f"{snippet}"
+            )
+
+        reduced.append({
+
+            "filename":
+                filename,
+
+            "content":
+                "\n".join(snippets)
+        })
+
+    return reduced or files
 
 def _extract_json(text):
-    text = text.replace("```json", "").replace("```", "").strip()
 
-    if text.lower().startswith("json"):
-        text = text[4:].strip()
-
-    start = text.find("{")
-    if start == -1:
-        print("SENDING: {'step': 'json_no_open_brace'}")
+    if not text:
         return None
 
-    stack = 0
+    text = text.replace("```json", "")
+    text = text.replace("```", "")
+    text = text.strip()
 
-    for i in range(start, len(text)):
-        if text[i] == "{":
-            stack += 1
-        elif text[i] == "}":
-            stack -= 1
+    candidates = []
 
-            if stack == 0:
-                candidate = text[start:i + 1]
+    start_positions = [
+        i for i, ch in enumerate(text)
+        if ch == "{"
+    ]
 
-                try:
-                    parsed = json.loads(candidate)
-                    return parsed
-                except Exception as e:
-                    print(f"SENDING: {{'step': 'json_candidate_failed', 'error': '{str(e)}'}}")
-                    continue
+    for start in start_positions:
 
-    print("SENDING: {'step': 'json_extraction_failed'}")
+        stack = 0
+
+        for i in range(start, len(text)):
+
+            if text[i] == "{":
+                stack += 1
+
+            elif text[i] == "}":
+                stack -= 1
+
+                if stack == 0:
+
+                    candidate = text[start:i + 1]
+                    candidates.append(candidate)
+                    break
+
+    candidates.sort(
+        key=len,
+        reverse=True
+    )
+
+    for candidate in candidates:
+
+        try:
+
+            return json.loads(candidate)
+
+        except Exception as e:
+
+            print(
+                f"SENDING: "
+                f"{{'step':'json_candidate_failed',"
+                f"'error':'{str(e)}'}}"
+            )
+
+    print(
+        "SENDING: "
+        "{'step':'json_extraction_failed'}"
+    )
+
     return None
-
 
 def _is_syntax_error(error_log):
     return _classify_error(error_log) == "syntax"
@@ -239,7 +328,7 @@ REFERENCE CONTEXT:
 {rag_context}
 
 FILES:
-{files}
+{json.dumps(files, indent=2)}
 """
 
     if req_ids:
@@ -352,13 +441,15 @@ def fix_code(error_log, files, trace=None, parent_span=None):
                 "llm_response": None
             }
 
-    # =========================
-    # LLM DEBUG (UNCHANGED FLOW)
-    # =========================
+    prompt_files = _extract_file_context(
+        files,
+        error_locations
+    )
+
     prompt = _build_prompt(
         error_type,
         error_log,
-        files,
+        prompt_files,
         error_locations,
         req_ids
     )
@@ -378,9 +469,61 @@ def fix_code(error_log, files, trace=None, parent_span=None):
             return {"files": files}
 
         parsed = _extract_json(text)
-
+        
         if not parsed:
-            print("SENDING: {'step': 'debug_json_parse_failed'}")
+        
+            print(
+                "SENDING: "
+                "{'step':'debug_json_repair_attempt'}"
+            )
+        
+            try:
+        
+                repair_prompt = f"""
+        Return ONLY valid JSON.
+        
+        Do not include markdown.
+        Do not include explanations.
+        
+        Previous response:
+        
+        {text}
+        """
+        
+                repair_response = llm.invoke(
+                    repair_prompt
+                )
+        
+                repair_text = (
+                    repair_response.content or ""
+                ).strip()
+        
+                parsed = _extract_json(
+                    repair_text
+                )
+        
+                if parsed:
+        
+                    print(
+                        "SENDING: "
+                        "{'step':'debug_json_repair_success'}"
+                    )
+        
+            except Exception as e:
+        
+                print(
+                    f"SENDING: "
+                    f"{{'step':'debug_json_repair_failed',"
+                    f"'error':'{str(e)}'}}"
+                )
+        
+        if not parsed:
+        
+            print(
+                "SENDING: "
+                "{'step':'debug_json_parse_failed'}"
+            )
+        
             return {"files": files}
 
         updated_files = parsed.get("files")
