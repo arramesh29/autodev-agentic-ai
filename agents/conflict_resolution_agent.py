@@ -29,6 +29,7 @@ Rules:
 - Define precedence rules clearly
 - Use AIS/SPICE regulations if relevant
 - Be logically consistent
+- Resolved_requirements MUST contain ALL original requirements
 
 Return STRICT JSON:
 
