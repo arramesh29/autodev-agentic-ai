@@ -248,20 +248,20 @@ def stream_workflow(query: str):
                 # ---------------------------------------------
                 if resolved.get("step") == "ambiguity_resolved_auto":
 
-                resolved_requirements = resolved["requirements"]
-                
-                original_map = {
-                    r["id"]: r
-                    for r in requirements
-                }
-                
-                for r in resolved_requirements:
-                
-                    original_map[r["id"]] = r
-                
-                requirements = list(
-                    original_map.values()
-                )
+                    resolved_requirements = resolved["requirements"]
+                    
+                    original_map = {
+                        r["id"]: r
+                        for r in requirements
+                    }
+                    
+                    for r in resolved_requirements:
+                    
+                        original_map[r["id"]] = r
+                    
+                    requirements = list(
+                        original_map.values()
+                    )
 
                     SESSION_STORE[session_id]["requirements"] = requirements
 
