@@ -44,7 +44,12 @@ def create_plan(requirements, trace=None, parent_span=None):
     formatted_requirements = ""
 
     for r in requirements:
-        formatted_requirements += f"{r['id']}: {r['description']}\n"
+        formatted_requirements += (
+            f"{r['id']} "
+            f"[{r.get('type','functional')}] "
+            f"[{r.get('priority','medium')}]: "
+            f"{r['description']}\n"
+        )
 
     # =====================================================
     # 🔥 RAG CONTEXT
@@ -76,20 +81,26 @@ Instructions:
    - Map each module/function to REQ-ID
 4. Identify test scenarios per requirement
 
-Output format:
+IMPORTANT:
 
+Use ONLY requirement IDs provided.
+Do NOT invent new requirement IDs.
+Every requirement must appear exactly once.
+Requirement count must remain unchanged.
+
+Output format:
 Return STRICT JSON only.
 
-{
+{{
   "modules": [
-    {
+    {{
       "name": "Perception",
       "requirements": [
         "REQ-001",
         "REQ-002"
       ],
       "functions": [
-        {
+        {{
           "name": "ProcessSensorInputs",
           "inputs": [
             "radar_tracks",
@@ -98,15 +109,15 @@ Return STRICT JSON only.
           "outputs": [
             "tracked_objects"
           ]
-        }
+        }}
       ],
       "test_cases": [
         "RadarObjectDetected",
         "CameraFusionWorks"
       ]
-    }
+    }}
   ]
-}
+}}
 """
 
     generation = None
@@ -127,24 +138,46 @@ Return STRICT JSON only.
         output = response.content
 
         parsed = _extract_json(output)
+
+        planned_reqs = set()
+        
+        for module in parsed.get("modules", []):
+        
+            planned_reqs.update(
+                module.get("requirements", [])
+            )
+        
+        original_reqs = {
+            r["id"]
+            for r in requirements
+        }
+        
+        missing = original_reqs - planned_reqs
+        
+        if missing:
+        
+            raise ValueError(
+                f"Planner lost requirements: {missing}"
+            )
         
         if not parsed:
             raise ValueError(
                 "Planner returned invalid JSON"
             )
         
-        output = json.dumps(
-            parsed,
-            indent=2
-        )
+        plan = parsed
         
         if generation:
-            generation.end(output=output[:2000])
-
+            generation.end(
+                output=json.dumps(plan)[:2000]
+            )
+        
         if span:
-            span.end(output=output[:1000])
-
-        return output
+            span.end(
+                output=json.dumps(plan)[:1000]
+            )
+        
+        return plan
 
     except Exception as e:
 
