@@ -138,7 +138,7 @@ def _extract_error_location(error_log):
 
     if locations:
         print(f"SENDING: {{'step': 'error_locations_detected', 'count': {len(locations)}}}")
-        return locations[:3]
+        return locations
 
     return None
 
