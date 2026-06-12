@@ -1,8 +1,31 @@
 import json
+import re
 from services.llm_service import llm
-
-# 🔥 NEW
 from tools.rag.rag_orchestrator import retrieve_context
+
+def safe_json_extract(text):
+
+    cleaned = (
+        text
+        .replace("```json", "")
+        .replace("```", "")
+    )
+
+    match = re.search(
+        r"\{.*\}",
+        cleaned,
+        re.DOTALL
+    )
+
+    if not match:
+        return None
+
+    json_str = match.group(0)
+
+    try:
+        return json.loads(json_str)
+    except:
+        return None
 
 
 def resolve_conflicts_llm(requirements, conflicts):
@@ -28,12 +51,11 @@ Rules:
 - Do NOT create new requirement IDs
 - Preserve all original requirement IDs
 - Add clarifications, notes, assumptions,
-  precedence rules, or metadata only
+  precedence rules, or metadata only to existing requirements 
 - Requirement count must remain unchanged
 - Define precedence rules clearly
 - Use AIS/SPICE regulations if relevant
 - Be logically consistent
-- Resolved_requirements MUST contain ALL original requirements
 
 Return STRICT JSON:
 
@@ -62,16 +84,34 @@ Conflicts:
 
     text = response.content.strip()
 
-    try:
-        return json.loads(text)
+    parsed = safe_json_extract(text)
 
-    except:
-
-        return {
-            "resolved_requirements": requirements,
-            "resolution_log": [],
-            "needs_user_input": True,
-            "questions": [
-                "Unable to resolve conflicts automatically"
-            ]
-        }
+    resolved = parsed.get(
+        "resolved_requirements",
+        []
+    )
+    
+    if len(resolved) < len(requirements):
+    
+        print(
+            "WARNING: Conflict resolution "
+            "reduced requirement count"
+        )
+    
+        parsed["resolved_requirements"] = requirements    
+    
+    if parsed:
+        return parsed
+    
+    print(
+        "Conflict resolution JSON parse failed"
+    )
+    
+    return {
+        "resolved_requirements": requirements,
+        "resolution_log": [],
+        "needs_user_input": True,
+        "questions": [
+            "Unable to resolve conflicts automatically"
+        ]
+    }
