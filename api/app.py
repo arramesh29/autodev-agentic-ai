@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import json
 import uuid
+import os
 
 from api.file_api import router as file_router
 
@@ -363,7 +364,7 @@ def continue_pipeline(session_id: str):
 
         except Exception as e:
 
-             try:
+            try:
             
                 yield emit_metrics(
                     session_id,
@@ -371,7 +372,7 @@ def continue_pipeline(session_id: str):
                     send
                 )
             
-            except Exception as e:
+            except Exception as exc:
             
                 print(
                     f"Metrics generation failed: {e}"
