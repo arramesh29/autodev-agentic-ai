@@ -136,15 +136,32 @@ Ambiguities:
 
 def apply_auto_resolutions(requirements, auto_resolved):
 
+    req_map = {
+        r.get("id"): r
+        for r in requirements
+        if r.get("id")
+    }
+
     for item in auto_resolved:
 
-        question = item.get("question")
-        recommended = item.get("recommended")
+        req_id = item.get("req_id")
 
-        for req in requirements:
+        if not req_id:
+            continue
 
-            req.setdefault("notes", []).append(
-                f"Auto-resolved: {question} → {recommended}"
-            )
+        req = req_map.get(req_id)
+
+        if not req:
+            continue
+
+        req.setdefault(
+            "clarifications",
+            []
+        )
+
+        req["clarifications"].append({
+            "question": item.get("question"),
+            "resolution": item.get("recommended")
+        })
 
     return requirements
