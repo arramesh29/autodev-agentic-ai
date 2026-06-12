@@ -106,7 +106,7 @@ def _classify_error(error_log):
         return "syntax"
 
     if any(x in log for x in [
-        "unresolved external", "lnk", "undefined reference", "cannot open source file"
+        "unresolved external", "lnk", "undefined reference", "cannot open source file","undeclared identifier","error c2065","error c3861","not declared"
     ]):
         return "build"
 
@@ -245,18 +245,43 @@ def _extract_json(text):
     )
 
     for candidate in candidates:
-
+    
         try:
-
-            return json.loads(candidate)
-
+    
+            parsed = json.loads(candidate)
+    
+            if isinstance(parsed, dict):
+                return parsed
+    
         except Exception as e:
-
+    
             print(
                 f"SENDING: "
                 f"{{'step':'json_candidate_failed',"
                 f"'error':'{str(e)}'}}"
             )
+    
+    # NEW fallback
+    try:
+    
+        first = text.find("{")
+        last = text.rfind("}")
+    
+        if first >= 0 and last > first:
+    
+            candidate = text[first:last + 1]
+    
+            parsed = json.loads(candidate)
+    
+            print(
+                "SENDING: "
+                "{'step':'json_fallback_success'}"
+            )
+    
+            return parsed
+    
+    except Exception:
+        pass
 
     print(
         "SENDING: "
@@ -268,6 +293,44 @@ def _extract_json(text):
 def _is_syntax_error(error_log):
     return _classify_error(error_log) == "syntax"
 
+def _fix_common_compile_errors(
+    error_log,
+    files
+):
+
+    log = error_log.lower()
+
+    if (
+        "m_pi" in log
+        and "undeclared identifier" in log
+    ):
+
+        fixed = []
+
+        for f in files:
+
+            content = f["content"]
+
+            if "M_PI" in content:
+
+                content = content.replace(
+                    "M_PI",
+                    "3.14159265358979323846"
+                )
+
+            fixed.append({
+                "filename": f["filename"],
+                "content": content
+            })
+
+        print(
+            "SENDING: "
+            "{'step':'deterministic_mpi_fix'}"
+        )
+
+        return fixed
+
+    return None
 
 # =========================
 # 🔥 UPDATED: SAFE SYNTAX FIX
@@ -416,6 +479,23 @@ def fix_code(error_log, files, trace=None, parent_span=None):
     error_locations = _extract_error_location(error_log)
     req_ids = _map_error_to_requirements(error_log, files)
 
+    deterministic_fix = _fix_common_compile_errors(
+        error_log,
+        files
+    )
+    
+    if deterministic_fix:
+    
+        return {
+            "files": deterministic_fix,
+            "debug_summary": {
+                "root_cause":
+                    "Known compile error",
+                "fix":
+                    "Deterministic repair"
+            }
+        }
+
     if error_type == "syntax":
         print("SENDING: {'step': 'syntax_error_detected'}")
 
@@ -527,12 +607,29 @@ def fix_code(error_log, files, trace=None, parent_span=None):
             return {"files": files}
 
         updated_files = parsed.get("files")
-
-        if not isinstance(updated_files, list):
-            print("SENDING: {'step': 'debug_invalid_files_structure'}")
+        
+        if updated_files is None:
+        
+            print(
+                "SENDING: "
+                "{'step':'debug_missing_files_key'}"
+            )
+        
             return {"files": files}
-
+        
+        if isinstance(updated_files, dict):
+            updated_files = [updated_files]
+        
         updated_files = _normalize_files(updated_files)
+        
+        if not updated_files:
+        
+            print(
+                "SENDING: "
+                "{'step':'debug_no_valid_updated_files'}"
+            )
+        
+            return {"files": files}
 
         print(f"SENDING: {{'step': 'debug_parsed_files_count', 'count': {len(updated_files)}}}")
 
@@ -541,10 +638,39 @@ def fix_code(error_log, files, trace=None, parent_span=None):
             return {"files": files}
 
         # ensure all files present
-        returned = {f["filename"] for f in updated_files}
-        for f in files:
-            if f["filename"] not in returned:
-                updated_files.append(f)
+        original_map = {
+            f["filename"]: f
+            for f in files
+        }
+        
+        patched_map = {
+            f["filename"]: f
+            for f in updated_files
+        }
+        
+        merged = []
+        
+        for filename, original in original_map.items():
+        
+            if filename in patched_map:
+        
+                merged.append(
+                    patched_map[filename]
+                )
+        
+            else:
+        
+                merged.append(
+                    original
+                )
+        
+        updated_files = merged
+        
+        print(
+            f"SENDING: "
+            f"{{'step':'debug_merge_success',"
+            f"'patched_files':{len(patched_map)}}}"
+        )
 
         if not _files_changed(files, updated_files):
             print("SENDING: {'step': 'debug_no_change_detected'}")
