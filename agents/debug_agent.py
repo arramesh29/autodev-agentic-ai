@@ -10,7 +10,7 @@ import re
 def _extract_req_ids(text):
     if not isinstance(text, str):
         return []
-    return list(set(re.findall(r"REQ-\d+", text)))
+    return list(set(re.findall(r"(REQ-\d+|DER-[A-Z0-9\-]+|SAF-\d+)",text)))
 
 
 # =========================
@@ -260,7 +260,7 @@ def _select_debug_context(
     # -----------------------------
     # ARCHITECTURAL FIX
     # -----------------------------
-    if architecture_score >= 3 or error_count > 15:
+    if architecture_score >= 3 or error_count > 5:
 
         print(
             "SENDING: "
@@ -474,7 +474,7 @@ def _validate_patch_size(
 
             ratio = new_size / old_size
 
-            if ratio < 0.80:
+            if ratio < 0.50 and error_type != "logic"::
 
                 print(
                     f"SENDING: "
@@ -752,6 +752,21 @@ def fix_code(error_log, files, trace=None, parent_span=None):
         
         updated_files = _normalize_files(updated_files)
 
+        print(
+            f"SENDING: "
+            f"{{'step':'debug_received_files',"
+            f"'count':{len(updated_files)}}}"
+        )
+        
+        for f in updated_files:
+        
+            print(
+                f"SENDING: "
+                f"{{'step':'patched_file',"
+                f"'file':'{f['filename']}',"
+                f"'size':{len(f['content'])}}}"
+            )        
+
         updated_files = _validate_patch_size(files,updated_files)
         
         if not updated_files:
@@ -805,14 +820,13 @@ def fix_code(error_log, files, trace=None, parent_span=None):
         )
 
         if not _files_changed(files, updated_files):
-            print("SENDING: {'step': 'debug_no_change_detected'}")
-
-            forced = []
-            for f in files:
-                forced.append({
-                    "filename": f["filename"],
-                    "content": f["content"] + "\n// debug iteration fix\n"
-                })
+        
+            print(
+                "SENDING: "
+                "{'step':'debug_no_change_detected'}"
+            )
+        
+            return {"files": files}
 
             print("SENDING: {'step': 'forced_change_applied'}")
 
