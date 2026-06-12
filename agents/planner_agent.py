@@ -1,8 +1,31 @@
 from services.llm_service import llm
-
-# 🔥 NEW
+import json
+import re
 from tools.rag.rag_orchestrator import retrieve_context
 
+def _extract_json(text):
+
+    cleaned = (
+        text
+        .replace("```json", "")
+        .replace("```", "")
+    )
+
+    match = re.search(
+        r"\{.*\}",
+        cleaned,
+        re.DOTALL
+    )
+
+    if not match:
+        return None
+
+    try:
+        return json.loads(
+            match.group(0)
+        )
+    except:
+        return None
 
 def create_plan(requirements, trace=None, parent_span=None):
 
@@ -55,11 +78,35 @@ Instructions:
 
 Output format:
 
-Module: <name>
-- REQ-IDs: [...]
-- Functions:
-- Inputs/Outputs:
-- Test Cases:
+Return STRICT JSON only.
+
+{
+  "modules": [
+    {
+      "name": "Perception",
+      "requirements": [
+        "REQ-001",
+        "REQ-002"
+      ],
+      "functions": [
+        {
+          "name": "ProcessSensorInputs",
+          "inputs": [
+            "radar_tracks",
+            "camera_objects"
+          ],
+          "outputs": [
+            "tracked_objects"
+          ]
+        }
+      ],
+      "test_cases": [
+        "RadarObjectDetected",
+        "CameraFusionWorks"
+      ]
+    }
+  ]
+}
 """
 
     generation = None
@@ -79,6 +126,18 @@ Module: <name>
 
         output = response.content
 
+        parsed = _extract_json(output)
+        
+        if not parsed:
+            raise ValueError(
+                "Planner returned invalid JSON"
+            )
+        
+        output = json.dumps(
+            parsed,
+            indent=2
+        )
+        
         if generation:
             generation.end(output=output[:2000])
 
