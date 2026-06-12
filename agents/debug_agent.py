@@ -542,7 +542,7 @@ CRITICAL:
 - Prefer fixing declarations and structure over random edits
 """
 
-base += """
+    base += """
 IMPORTANT:
 
 Do NOT regenerate entire files.
