@@ -104,10 +104,21 @@ def emit_metrics(
                     )
                     break
 
+        session = SESSION_STORE.get(
+            session_id,
+            {}
+        )
+        
         metrics = generate_execution_metrics(
             session_id=session_id,
             pipeline_status=status,
-            requirements_file=req_file
+            requirements_file=req_file,
+            ambiguity_result=session.get(
+                "ambiguity_result"
+            ),
+            conflict_result=session.get(
+                "conflict_result"
+            )
         )
 
         return send({
@@ -186,6 +197,8 @@ def stream_workflow(query: str):
                     conflicts
                 )
 
+                SESSION_STORE[session_id]["conflict_result"] = resolved
+
                 # ---------------------------------------------
                 # USER INPUT REQUIRED
                 # ---------------------------------------------
@@ -243,6 +256,8 @@ def stream_workflow(query: str):
                     ambiguities
                 )
 
+                SESSION_STORE[session_id]["ambiguity_result"] = resolved
+                
                 # ---------------------------------------------
                 # AUTO RESOLVED
                 # ---------------------------------------------
