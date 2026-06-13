@@ -183,6 +183,16 @@ Return STRICT JSON only.
                 fallback_module[
                     "requirements"
                 ].append(req_id)
+                
+                fallback_module["functions"].append({
+                    "name": f"Implement_{req_id}",
+                    "inputs": [],
+                    "outputs": []
+                })
+                
+                fallback_module["test_cases"].append(
+                    f"Verify_{req_id}"
+                )
         
         if not parsed:
             raise ValueError(
