@@ -25,7 +25,7 @@ def safe_json_extract(text):
         return None
 
 
-def generate_code(plan, requirements=None, trace=None, parent_span=None):
+def generate_code(plan, requirements=None, validation_feedback=None, trace=None, parent_span=None):
 
     span = None
     if trace:
@@ -50,6 +50,41 @@ def generate_code(plan, requirements=None, trace=None, parent_span=None):
     rag_context = retrieve_context(
     req_context + str(plan),
     "codegen")
+
+    # =====================================================
+    # Feedback CONTEXT
+    # =====================================================
+    
+    feedback_context = ""
+    
+    if validation_feedback:
+    
+        feedback_context = f"""
+    ==============================
+    PREVIOUS ATTEMPT FAILED
+    ==============================
+    
+    Failure Type:
+    {validation_feedback.get("type")}
+    
+    Message:
+    {validation_feedback.get("message")}
+    
+    Missing Requirements:
+    {validation_feedback.get("missing_requirements", [])}
+    
+    Coverage:
+    {validation_feedback.get("coverage_percent")}
+    
+    IMPORTANT:
+    The previous implementation was rejected.
+    
+    You MUST correct the above issue.
+    
+    Do NOT repeat the same mistake.
+    
+    Verify that the generated files fully satisfy the validation requirement before returning the JSON.
+    """
     
     # =========================
     # PROMPT
@@ -74,6 +109,7 @@ DEVELOPMENT PLAN
 ==============================
 {plan}
 
+{feedback_context}
 ==============================
 CRITICAL TRACEABILITY RULE
 ==============================
@@ -92,22 +128,17 @@ Example:
 REQUIREMENT COVERAGE RULE
 ==============================
 
-ALL requirements MUST be implemented.
+Before generating code:
+
+1. Count the number of requirements provided.
+2. Create an implementation mapping for every requirement.
+3. Create at least one test for every requirement.
+4. Verify no requirement is omitted.
+5. Return code only after all requirements are covered.
+If any requirement is not implemented, regenerate internally before returning.
 
 Every requirement listed above must appear:
-
-REQ
-  ↓
-Code
-  ↓
-Test
-
-No requirement may be ignored.
-
-If 33 requirements exist,
-33 requirements must be represented.
-
-Do not implement only a subset.
+REQ -> Code -> Test
 
 ==============================
 GENERAL RULES
