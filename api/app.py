@@ -98,7 +98,7 @@ def resume_build_loop(
             parsed
         )
 
-        if confidence["status"] == "success":
+        if (confidence["status"] == "success" | confidence["status"] == "partial") :
 
             yield emit_metrics(
                 session_id,
