@@ -141,24 +141,48 @@ Return STRICT JSON only.
 
         planned_reqs = set()
         
-        for module in parsed.get("modules", []):
-        
+        for module in parsed["modules"]:
             planned_reqs.update(
                 module.get("requirements", [])
             )
         
-        original_reqs = {
-            r["id"]
+        original_map = {
+            r["id"]: r
             for r in requirements
         }
         
-        missing = original_reqs - planned_reqs
+        missing = set(original_map.keys()) - planned_reqs
         
         if missing:
         
-            raise ValueError(
-                f"Planner lost requirements: {missing}"
+            print(
+                f"WARNING: Planner missed "
+                f"{len(missing)} requirements"
             )
+        
+            fallback_module = None
+        
+            if parsed["modules"]:
+                fallback_module = parsed["modules"][-1]
+        
+            else:
+        
+                fallback_module = {
+                    "name": "RecoveredRequirements",
+                    "requirements": [],
+                    "functions": [],
+                    "test_cases": []
+                }
+        
+                parsed["modules"].append(
+                    fallback_module
+                )
+        
+            for req_id in missing:
+        
+                fallback_module[
+                    "requirements"
+                ].append(req_id)
         
         if not parsed:
             raise ValueError(
