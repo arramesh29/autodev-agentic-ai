@@ -22,6 +22,7 @@ def generate_execution_metrics(
     requirements_file=None,
     ambiguity_result=None,
     conflict_result=None,
+    test_result=None,
     coverage_file="generated/implementation_coverage.json",
     traceability_file="generated/traceability.json",
     output_file="generated/execution_metrics.json"
@@ -43,7 +44,12 @@ def generate_execution_metrics(
         "ambiguities_resolved": 0,
 
         "conflicts_detected": 0,
-        "conflicts_resolved": 0
+        "conflicts_resolved": 0,
+
+        "tests_total": 0,
+        "tests_passed": 0,
+        "tests_failed": 0,
+        "test_pass_percent": 0
     }
 
     requirements = load_json(requirements_file) \
@@ -111,6 +117,23 @@ def generate_execution_metrics(
                 )
             )
         )
+
+    if test_result:
+
+        total = test_result.get("total", 0)
+        passed = test_result.get("passed", 0)
+    
+        metrics["tests_total"] = total
+        metrics["tests_passed"] = passed
+        metrics["tests_failed"] = test_result.get(
+            "failed",
+            0
+        )
+    
+        metrics["test_pass_percent"] = round(
+            (passed / total) * 100,
+            2
+        ) if total else 0
     
     coverage_summary = coverage.get(
         "summary",
