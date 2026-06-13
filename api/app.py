@@ -98,7 +98,11 @@ def resume_build_loop(
             parsed
         )
 
-        if (confidence["status"] == "success" | confidence["status"] == "partial") :
+        if confidence["status"] in [
+            "success",
+            "acceptable",
+            "partial"
+        ]:
 
             yield emit_metrics(
                 session_id,
@@ -409,7 +413,15 @@ def stream_workflow(query: str):
 # =========================================================
 @app.get("/agent/continue")
 def continue_pipeline(session_id: str):
+    if state == "completed":
 
+    yield send({
+        "step": "already_completed",
+        **session.get("final_status", {})
+    })
+
+    return
+    
     session = SESSION_STORE.get(session_id, {})
 
     requirements = session.get("requirements", [])
@@ -462,6 +474,15 @@ def continue_pipeline(session_id: str):
             # =================================================
             # CONTINUE IMPLEMENTATION PIPELINE
             # =================================================
+            if session.get("pipeline_state") == "completed":
+            
+                yield send({
+                    "step": "already_completed",
+                    "message": "Pipeline already accepted"
+                })
+            
+                return
+                
             state = session.get(
                 "pipeline_state"
             )
@@ -667,6 +688,12 @@ def run_pipeline(session_id, requirements, send):
         )
         
         SESSION_STORE[session_id]["final_test_result"] = parsed
+
+        SESSION_STORE[session_id]["final_status"] = {
+            "pass_percent": pass_percent,
+            "passed": passed,
+            "failed": parsed.get("failed", 0)
+        }
         
         if pass_percent >= PASS_THRESHOLD:
         
@@ -684,6 +711,10 @@ def run_pipeline(session_id, requirements, send):
                     f"Metrics generation failed: {e}"
                 )
         
+            SESSION_STORE[session_id][
+                "pipeline_state"
+            ] = "completed"            
+            
             yield send({
                 "step": "accepted_result",
                 "pass_percent": round(pass_percent, 2),
