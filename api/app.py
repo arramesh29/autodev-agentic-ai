@@ -415,12 +415,12 @@ def stream_workflow(query: str):
 def continue_pipeline(session_id: str):
     if state == "completed":
 
-    yield send({
-        "step": "already_completed",
-        **session.get("final_status", {})
-    })
-
-    return
+        yield send({
+            "step": "already_completed",
+            **session.get("final_status", {})
+        })
+    
+        return
     
     session = SESSION_STORE.get(session_id, {})
 
