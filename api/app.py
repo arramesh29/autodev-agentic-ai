@@ -547,6 +547,12 @@ def run_pipeline(session_id, requirements, send):
         # -------------------------------------------------
         fix_result = fix_code(output, files)
 
+        if fix_result.get("debug_failed"):
+        
+            raise RuntimeError(
+                "Debug iteration produced no file changes"
+            )
+
         files = fix_result.get("files", files)
 
         write_files(files)
