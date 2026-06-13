@@ -85,12 +85,27 @@ Conflicts:
     text = response.content.strip()
 
     parsed = safe_json_extract(text)
-
+    
+    if not parsed:
+    
+        print(
+            "Conflict resolution JSON parse failed"
+        )
+    
+        return {
+            "resolved_requirements": requirements,
+            "resolution_log": [],
+            "needs_user_input": True,
+            "questions": [
+                "Unable to resolve conflicts automatically"
+            ]
+        }
+    
     resolved = parsed.get(
         "resolved_requirements",
         []
     )
-    
+
     if len(resolved) < len(requirements):
     
         print(
@@ -101,6 +116,12 @@ Conflicts:
         parsed["resolved_requirements"] = requirements    
     
     if parsed:
+        parsed["conflicts_resolved"] = len(
+            parsed.get(
+                "resolution_log",
+                []
+            )
+        )
         return parsed
     
     print(
