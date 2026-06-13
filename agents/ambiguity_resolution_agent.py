@@ -130,7 +130,9 @@ Ambiguities:
     return {
         "step": "ambiguity_options",
         "options": options,
-        "auto_resolved_count": len(auto_resolved)
+        "auto_resolved_count": len(auto_resolved),
+        "auto_resolved": auto_resolved,
+        "user_resolution_required": len(user_options)
     }
 
 
