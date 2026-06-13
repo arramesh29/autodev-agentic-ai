@@ -23,10 +23,17 @@ def compute_confidence(test_result: dict):
     score = max(0.0, min(score, 1.0))
 
     # Decision
-    if score == 1.0:
+    pass_percent = pass_ratio * 100
+    
+    if pass_percent >= 95:
         status = "success"
-    elif score > 0.7:
+    
+    elif pass_percent >= 80:
+        status = "acceptable"
+    
+    elif pass_percent >= 60:
         status = "partial"
+    
     else:
         status = "retry"
 
