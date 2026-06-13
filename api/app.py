@@ -394,6 +394,32 @@ def continue_pipeline(session_id: str):
             if msg:
                 yield msg
 
+            stage = session.get("stage")
+            
+            if stage == "ambiguity":
+            
+                ambiguities = session.get("ambiguities", [])
+            
+                if ambiguities:
+            
+                    resolved = resolve_ambiguities_llm(
+                        requirements,
+                        ambiguities
+                    )
+            
+                    SESSION_STORE[session_id]["ambiguity_result"] = resolved
+            
+                    if resolved.get("step") != "ambiguity_resolved_auto":
+            
+                        yield send_event(resolved)
+                        return
+            
+                    requirements = resolved["requirements"]
+            
+                    SESSION_STORE[session_id]["requirements"] = requirements
+            
+                    SESSION_STORE[session_id]["stage"] = "implementation"
+            
             # =================================================
             # CONTINUE IMPLEMENTATION PIPELINE
             # =================================================
@@ -614,9 +640,16 @@ def resolve_conflict(request: dict):
     )
 
     SESSION_STORE[session_id]["requirements"] = updated
-
+    
     SESSION_STORE[session_id]["conflicts_resolved"] = answers
 
+    SESSION_STORE[session_id]["stage"] = "ambiguity"
+    
+    SESSION_STORE[session_id]["conflict_result"] = {
+        "resolution_log": answers,
+        "conflicts_resolved": len(answers)
+    }
+    
     return {
         "status": "conflict_resolved"
     }
@@ -642,9 +675,16 @@ def resolve_ambiguity(request: dict):
     )
 
     SESSION_STORE[session_id]["requirements"] = updated
-
+    
     SESSION_STORE[session_id]["ambiguities_resolved"] = decisions
 
+    SESSION_STORE[session_id]["stage"] = "implementation"
+    
+    SESSION_STORE[session_id]["ambiguity_result"] = {
+        "auto_resolved_count": 0,
+        "user_resolution_required": len(decisions)
+    }
+    
     return {
         "status": "ambiguity_resolved"
     }
