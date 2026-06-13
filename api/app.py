@@ -396,29 +396,10 @@ def continue_pipeline(session_id: str):
 
             stage = session.get("stage")
             
-            if stage == "ambiguity":
-            
-                ambiguities = session.get("ambiguities", [])
-            
-                if ambiguities:
-            
-                    resolved = resolve_ambiguities_llm(
-                        requirements,
-                        ambiguities
-                    )
-            
-                    SESSION_STORE[session_id]["ambiguity_result"] = resolved
-            
-                    if resolved.get("step") != "ambiguity_resolved_auto":
-            
-                        yield send_event(resolved)
-                        return
-            
-                    requirements = resolved["requirements"]
-            
-                    SESSION_STORE[session_id]["requirements"] = requirements
-            
-                    SESSION_STORE[session_id]["stage"] = "implementation"
+            yield send({
+                "step": "continue_from_stage",
+                "stage": stage
+            })
             
             # =================================================
             # CONTINUE IMPLEMENTATION PIPELINE
