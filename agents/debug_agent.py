@@ -437,7 +437,12 @@ def _validate_patch_size(
 
             ratio = new_size / old_size
 
-            if ratio < 0.50 and error_type != "logic":
+        if error_type == "syntax":        
+            threshold = 0.15
+        else:
+            threshold = 0.50
+
+            if ratio < threshold and error_type != "logic":
 
                 print(
                     f"SENDING: "
