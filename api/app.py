@@ -78,6 +78,61 @@ def save_requirements_once(session_id, requirements, send):
         "file": file_path
     })
 
+def resume_build_loop(
+    session_id,
+    files,
+    send
+):
+
+    MAX_RETRIES = 5
+
+    for attempt in range(MAX_RETRIES):
+
+        output = build_and_test()
+
+        parsed = parse_ctest_output(
+            output
+        )
+
+        confidence = compute_confidence(
+            parsed
+        )
+
+        if confidence["status"] == "success":
+
+            yield emit_metrics(
+                session_id,
+                "SUCCESS",
+                send
+            )
+
+            yield send({
+                "step": "done"
+            })
+
+            return
+
+        fix_result = fix_code(
+            output,
+            files
+        )
+
+        if fix_result.get(
+            "debug_failed"
+        ):
+            break
+
+        files = fix_result.get(
+            "files",
+            files
+        )
+
+        SESSION_STORE[session_id][
+            "generated_files"
+        ] = files
+
+        write_files(files)
+
 def emit_metrics(
     session_id,
     status,
@@ -404,11 +459,38 @@ def continue_pipeline(session_id: str):
             # =================================================
             # CONTINUE IMPLEMENTATION PIPELINE
             # =================================================
-            yield from run_pipeline(
-                session_id,
-                requirements,
-                send
+            state = session.get(
+                "pipeline_state"
             )
+            
+            if state in [
+                "building",
+                "debugging",
+                "code_generated"
+            ]:
+            
+                yield send({
+                    "step": "resume_build_loop"
+                })
+            
+                files = session.get(
+                    "generated_files",
+                    []
+                )
+            
+                yield from resume_build_loop(
+                    session_id,
+                    files,
+                    send
+                )
+            
+            else:
+            
+                yield from run_pipeline(
+                    session_id,
+                    requirements,
+                    send
+                )
 
         except Exception as e:
 
@@ -442,14 +524,28 @@ def continue_pipeline(session_id: str):
 # =========================================================
 def run_pipeline(session_id, requirements, send):
 
-    # =====================================================
-    # PLAN
-    # =====================================================
-    plan = create_plan(requirements)
+    session = SESSION_STORE.get(
+        session_id,
+        {}
+    )
 
-    yield send({
-        "step": "plan_created"
-    })
+    plan = session.get("plan")
+
+    if plan is None:
+
+        plan = create_plan(requirements)
+
+        SESSION_STORE[session_id]["plan"] = plan
+
+        yield send({
+            "step": "plan_created"
+        })
+
+    else:
+
+        yield send({
+            "step": "plan_reused"
+        })
 
     # =====================================================
     # CODEGEN
@@ -503,6 +599,14 @@ def run_pipeline(session_id, requirements, send):
 
     files = result.get("files", [])
 
+    SESSION_STORE[session_id][
+        "generated_files"
+    ] = files
+    
+    SESSION_STORE[session_id][
+        "pipeline_state"
+    ] = "code_generated"
+
     yield send({
         "step": "code_generated",
         "files": [f["filename"] for f in files]
@@ -519,6 +623,10 @@ def run_pipeline(session_id, requirements, send):
     # BUILD + DEBUG LOOP
     # =====================================================
     MAX_RETRIES = 5
+
+    SESSION_STORE[session_id][
+        "pipeline_state"
+    ] = "building"
 
     for attempt in range(MAX_RETRIES):
 
@@ -567,6 +675,10 @@ def run_pipeline(session_id, requirements, send):
         # -------------------------------------------------
         # DEBUG FIX
         # -------------------------------------------------
+        SESSION_STORE[session_id][
+            "pipeline_state"
+        ] = "debugging"
+        
         fix_result = fix_code(output, files)
 
         if fix_result.get("debug_failed"):
