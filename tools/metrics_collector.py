@@ -85,11 +85,9 @@ def generate_execution_metrics(
             0
         )
     
-        user_count = len(
-            ambiguity_result.get(
-                "user_answers",
-                []
-            )
+        user_count = ambiguity_result.get(
+            "user_resolution_required",
+            0
         )
     
         metrics["ambiguities_resolved"] = (
@@ -102,10 +100,15 @@ def generate_execution_metrics(
     
     if conflict_result:
     
-        metrics["conflicts_resolved"] = len(
+        metrics["conflicts_resolved"] = (
             conflict_result.get(
-                "resolution_log",
-                []
+                "conflicts_resolved",
+                len(
+                    conflict_result.get(
+                        "resolution_log",
+                        []
+                    )
+                )
             )
         )
     
