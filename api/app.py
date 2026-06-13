@@ -553,16 +553,19 @@ def run_pipeline(session_id, requirements, send):
     MAX_CODEGEN_RETRIES = 2
 
     result = None
-
+    last_error = None
     for retry in range(MAX_CODEGEN_RETRIES):
 
         result = generate_code(
             plan,
-            requirements=requirements
+            requirements=requirements,
+            validation_feedback=last_error
         )
 
         if not result.get("error"):
             break
+
+        last_error = result["error"]
 
         yield send({
             "step": "codegen_retry",
