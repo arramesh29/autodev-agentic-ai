@@ -173,6 +173,9 @@ def emit_metrics(
             ),
             conflict_result=session.get(
                 "conflict_result"
+            ),
+            test_result=session.get(
+                "final_test_result"
             )
         )
 
@@ -653,24 +656,41 @@ def run_pipeline(session_id, requirements, send):
         # -------------------------------------------------
         # SUCCESS
         # -------------------------------------------------
-        if confidence["status"] == "success":
+        PASS_THRESHOLD = 80.0
+        
+        total = parsed.get("total", 0)
+        passed = parsed.get("passed", 0)
+        
+        pass_percent = (
+            (passed / total) * 100
+            if total > 0 else 0
+        )
+        
+        SESSION_STORE[session_id]["final_test_result"] = parsed
+        
+        if pass_percent >= PASS_THRESHOLD:
         
             try:
-            
+        
                 yield emit_metrics(
                     session_id,
-                    "SUCCESS",
+                    "PARTIAL_SUCCESS" if pass_percent < 100 else "SUCCESS",
                     send
                 )
-            
+        
             except Exception as e:
-            
+        
                 print(
                     f"Metrics generation failed: {e}"
                 )
         
             yield send({
-                "step": "done"
+                "step": "accepted_result",
+                "pass_percent": round(pass_percent, 2),
+                "passed": passed,
+                "failed": parsed.get("failed", 0),
+                "total": total,
+                "failed_tests": parsed.get("failed_tests", [])
             })
         
             return
