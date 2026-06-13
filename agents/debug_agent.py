@@ -289,77 +289,39 @@ def _extract_json(text):
         return None
 
     text = text.replace("```json", "")
-    text = text.replace("```", "")
-    text = text.strip()
+    text = text.replace("```", "").strip()
 
-    candidates = []
+    # First try whole response
+    try:
+        parsed = json.loads(text)
 
-    start_positions = [
-        i for i, ch in enumerate(text)
-        if ch == "{"
-    ]
+        if isinstance(parsed, dict):
+            return parsed
 
-    for start in start_positions:
+    except Exception:
+        pass
 
-        stack = 0
+    # Find largest JSON object
+    first = text.find("{")
+    last = text.rfind("}")
 
-        for i in range(start, len(text)):
+    if first >= 0 and last > first:
 
-            if text[i] == "{":
-                stack += 1
-
-            elif text[i] == "}":
-                stack -= 1
-
-                if stack == 0:
-
-                    candidate = text[start:i + 1]
-                    candidates.append(candidate)
-                    break
-
-    candidates.sort(
-        key=len,
-        reverse=True
-    )
-
-    for candidate in candidates:
-    
         try:
-    
-            parsed = json.loads(candidate)
-    
+            parsed = json.loads(
+                text[first:last+1]
+            )
+
             if isinstance(parsed, dict):
                 return parsed
-    
+
         except Exception as e:
-    
+
             print(
                 f"SENDING: "
                 f"{{'step':'json_candidate_failed',"
                 f"'error':'{str(e)}'}}"
             )
-    
-    # NEW fallback
-    try:
-    
-        first = text.find("{")
-        last = text.rfind("}")
-    
-        if first >= 0 and last > first:
-    
-            candidate = text[first:last + 1]
-    
-            parsed = json.loads(candidate)
-    
-            print(
-                "SENDING: "
-                "{'step':'json_fallback_success'}"
-            )
-    
-            return parsed
-    
-    except Exception:
-        pass
 
     print(
         "SENDING: "
@@ -449,7 +411,8 @@ def _force_syntax_fix(files):
 
 def _validate_patch_size(
     original_files,
-    updated_files
+    updated_files,
+    error_type
 ):
 
     original_map = {
@@ -734,7 +697,10 @@ def fix_code(error_log, files, trace=None, parent_span=None):
                 "{'step':'debug_json_parse_failed'}"
             )
         
-            return {"files": files}
+            return {
+                "files": files,
+                "debug_failed": True
+            }
 
         updated_files = parsed.get("files")
         
@@ -745,7 +711,10 @@ def fix_code(error_log, files, trace=None, parent_span=None):
                 "{'step':'debug_missing_files_key'}"
             )
         
-            return {"files": files}
+            return {
+                "files": files,
+                "debug_failed": True
+            }
         
         if isinstance(updated_files, dict):
             updated_files = [updated_files]
@@ -767,7 +736,7 @@ def fix_code(error_log, files, trace=None, parent_span=None):
                 f"'size':{len(f['content'])}}}"
             )        
 
-        updated_files = _validate_patch_size(files,updated_files)
+        updated_files = _validate_patch_size(files,updated_files,error_type)
         
         if not updated_files:
         
@@ -776,13 +745,12 @@ def fix_code(error_log, files, trace=None, parent_span=None):
                 "{'step':'debug_no_valid_updated_files'}"
             )
         
-            return {"files": files}
+            return {
+                "files": files,
+                "debug_failed": True
+            }
 
         print(f"SENDING: {{'step': 'debug_parsed_files_count', 'count': {len(updated_files)}}}")
-
-        if not updated_files:
-            print("SENDING: {'step': 'debug_no_files'}")
-            return {"files": files}
 
         # ensure all files present
         original_map = {
@@ -826,11 +794,10 @@ def fix_code(error_log, files, trace=None, parent_span=None):
                 "{'step':'debug_no_change_detected'}"
             )
         
-            return {"files": files}
-
-            print("SENDING: {'step': 'forced_change_applied'}")
-
-            return {"files": forced}
+            return {
+                "files": files,
+                "debug_failed": True
+            }
 
         print("SENDING: {'step': 'debug_fix_applied'}")
 
