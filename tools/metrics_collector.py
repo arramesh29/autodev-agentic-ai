@@ -20,6 +20,8 @@ def generate_execution_metrics(
     session_id,
     pipeline_status,
     requirements_file=None,
+    ambiguity_result=None,
+    conflict_result=None,
     coverage_file="generated/implementation_coverage.json",
     traceability_file="generated/traceability.json",
     output_file="generated/execution_metrics.json"
@@ -72,6 +74,41 @@ def generate_execution_metrics(
         )
     )
 
+    # -------------------------
+    # Ambiguity metrics
+    # -------------------------
+    
+    if ambiguity_result:
+    
+        auto_count = ambiguity_result.get(
+            "auto_resolved_count",
+            0
+        )
+    
+        user_count = len(
+            ambiguity_result.get(
+                "user_answers",
+                []
+            )
+        )
+    
+        metrics["ambiguities_resolved"] = (
+            auto_count + user_count
+        )
+    
+    # -------------------------
+    # Conflict metrics
+    # -------------------------
+    
+    if conflict_result:
+    
+        metrics["conflicts_resolved"] = len(
+            conflict_result.get(
+                "resolution_log",
+                []
+            )
+        )
+    
     coverage_summary = coverage.get(
         "summary",
         {}
