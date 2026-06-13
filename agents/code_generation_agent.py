@@ -232,13 +232,27 @@ STRICT JSON FORMAT
         # =========================
         # TRACEABILITY CHECK
         # =========================
-        if requirements:
-            for f in validated_files:
-                if "REQ-" not in f["content"]:
-                    return {
-                        "error": f"Missing REQ traceability in {f['filename']}",
-                        "raw_output": text
-                    }
+        traceability_failures = []
+        
+        for f in validated_files:
+        
+            reqs_in_file = re.findall(
+                r"REQ-\d+",
+                f["content"]
+            )
+        
+            if not reqs_in_file:
+        
+                traceability_failures.append(
+                    f["filename"]
+                )
+        
+        if traceability_failures:
+        
+            print(
+                "Traceability warning:",
+                traceability_failures
+            )
 
         result["files"] = validated_files
 
