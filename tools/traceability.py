@@ -3,8 +3,16 @@ import os
 import re
 
 
-REQ_PATTERN = r"REQ-\d+"
+REQ_PATTERN = r"REQ[-_]?\d+"
 
+def normalize_req(req_id):
+
+    digits = re.findall(r"\d+", req_id)
+
+    if not digits:
+        return req_id
+
+    return f"REQ-{digits[0].zfill(3)}"
 
 def generate_traceability(
     requirements,
@@ -38,9 +46,13 @@ def generate_traceability(
         filename = f.get("filename", "")
         content = f.get("content", "")
 
-        req_ids = set(
-            re.findall(REQ_PATTERN, content)
-        )
+        req_ids = {
+            normalize_req(r)
+            for r in re.findall(
+                REQ_PATTERN,
+                content
+            )
+        }
 
         for req_id in req_ids:
 
