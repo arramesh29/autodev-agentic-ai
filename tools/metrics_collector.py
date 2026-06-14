@@ -106,16 +106,28 @@ def generate_execution_metrics(
     
     if conflict_result:
     
-        metrics["conflicts_resolved"] = (
-            conflict_result.get(
-                "conflicts_resolved",
+        detected_conflicts = metrics[
+            "conflicts_detected"
+        ]
+        
+        resolved_conflicts = conflict_result.get(
+            "conflicts_resolved"
+        )
+        
+        if resolved_conflicts is None:
+        
+            resolved_conflicts = min(
+                detected_conflicts,
                 len(
                     conflict_result.get(
-                        "resolution_log",
+                        "resolved_conflicts",
                         []
                     )
                 )
             )
+        
+        metrics["conflicts_resolved"] = (
+            resolved_conflicts
         )
 
     if test_result:
