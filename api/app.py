@@ -784,9 +784,14 @@ def resolve_conflict(request: dict):
 
     SESSION_STORE[session_id]["stage"] = "ambiguity"
     
+    existing = SESSION_STORE[session_id].get(
+        "conflict_result",
+        {}
+    )
+    
     SESSION_STORE[session_id]["conflict_result"] = {
-        "resolution_log": answers,
-        "conflicts_resolved": len(answers)
+        **existing,
+        "resolved_conflicts": answers
     }
     
     return {
@@ -819,8 +824,13 @@ def resolve_ambiguity(request: dict):
 
     SESSION_STORE[session_id]["stage"] = "implementation"
     
+    existing = SESSION_STORE[session_id].get(
+        "ambiguity_result",
+        {}
+    )
+    
     SESSION_STORE[session_id]["ambiguity_result"] = {
-        "auto_resolved_count": 0,
+        **existing,
         "user_resolution_required": len(decisions)
     }
     
