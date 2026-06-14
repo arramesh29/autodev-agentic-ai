@@ -126,8 +126,9 @@ def generate_execution_metrics(
                 )
             )
         
-        metrics["conflicts_resolved"] = (
-            resolved_conflicts
+        metrics["conflicts_resolved"] = min(
+            resolved_conflicts,
+            detected_conflicts
         )
 
     if test_result:
