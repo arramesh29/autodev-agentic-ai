@@ -122,6 +122,7 @@ Ambiguities:
     for item in user_options:
 
         options.append({
+            "req_id": item.get("req_id"),
             "question": item.get("question"),
             "choices": item.get("choices", []),
             "recommended": item.get("recommended")
@@ -132,6 +133,7 @@ Ambiguities:
         "options": options,
         "auto_resolved_count": len(auto_resolved),
         "auto_resolved": auto_resolved,
+        "user_options": user_options,
         "user_resolution_required": len(user_options)
     }
 
