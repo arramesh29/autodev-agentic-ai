@@ -1,18 +1,38 @@
 def apply_user_choices(requirements, decisions):
 
-    updated = requirements.copy()
-    next_id = len(requirements) + 1
+    req_map = {
+        r.get("id"): r
+        for r in requirements
+        if r.get("id")
+    }
 
     for d in decisions:
-        updated.append({
-            "id": f"REQ-{str(next_id).zfill(3)}",
-            "description": d.get("decision"),
-            "type": "derived",
-            "priority": "high",
-            "atomic": True,
-            "testable": True,
-            "tags": ["user-selected"]
-        })
-        next_id += 1
 
-    return updated
+        req_id = d.get("req_id")
+
+        if not req_id:
+            continue
+
+        req = req_map.get(req_id)
+
+        if not req:
+            continue
+
+        req.setdefault(
+            "clarifications",
+            []
+        )
+
+        req["clarifications"].append({
+            "question": d.get(
+                "question",
+                ""
+            ),
+            "resolution":
+                d.get("decision")
+                or d.get("selected_option")
+                or d.get("selected")
+                or d.get("answer")
+        })
+
+    return list(req_map.values())
